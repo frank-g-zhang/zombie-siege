@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>末日突围 · ZOMBIE SIEGE</title>
+</head>
+<body>
+  <div class="zfps-root" id="game-root">
+    <canvas class="zfps-canvas" id="game-canvas" tabindex="0"></canvas>
+
+    <!-- 顶部工具栏（游戏进行中隐藏） -->
+    <div class="zfps-topbar" id="topbar">
+      <div class="zfps-topbar-title">末日突围 · ZOMBIE SIEGE</div>
+      <div class="zfps-topbar-actions">
+        <button class="zfps-mini-btn" id="btn-fullscreen" type="button">全屏</button>
+        <button class="zfps-mini-btn" id="btn-close" type="button">返回大厅</button>
+      </div>
+    </div>
+
+    <!-- 主菜单 -->
+    <div class="zfps-screen" id="screen-menu">
+      <div class="zfps-panel">
+        <div class="zfps-launcher-badge">第一人称 · 尸潮生存射击</div>
+        <h1>末日突围</h1>
+        <div class="zfps-panel-sub">ZOMBIE SIEGE</div>
+        <p>城市已经沦陷，尸潮从四面八方涌来。守住防线，消灭 6 波丧尸，杀出一条血路，完成最后的突围！</p>
+        <div class="zfps-controls-mini">
+          <div><b>W A S D</b><span>移动</span></div>
+          <div><b>Shift</b><span>奔跑</span></div>
+          <div><b>鼠标</b><span>瞄准 / 转向</span></div>
+          <div><b>左键</b><span>射击</span></div>
+          <div><b>R</b><span>换弹</span></div>
+          <div><b>Esc</b><span>暂停</span></div>
+        </div>
+        <button class="zfps-btn" id="btn-start" type="button">开始突围</button>
+        <div class="zfps-note">开始后浏览器会锁定鼠标；爆头 3 倍伤害，击倒丧尸有概率掉落补给。</div>
+      </div>
+    </div>
+
+    <!-- 暂停 -->
+    <div class="zfps-screen zfps-hidden" id="screen-paused">
+      <div class="zfps-panel">
+        <h2>已暂停</h2>
+        <p>尸潮暂时停下了脚步，但你还没有突围成功。继续战斗，或者重整旗鼓。</p>
+        <button class="zfps-btn" id="btn-resume" type="button">继续战斗</button>
+        <button class="zfps-btn sec" id="btn-restart-paused" type="button">重新开始</button>
+        <button class="zfps-btn sec" id="btn-menu-paused" type="button">返回大厅</button>
+        <div class="zfps-note">继续战斗将重新锁定鼠标，请允许浏览器进行鼠标锁定。</div>
+      </div>
+    </div>
+
+    <!-- 失败结算 -->
+    <div class="zfps-screen zfps-hidden" id="screen-over">
+      <div class="zfps-panel">
+        <h2>你被尸潮吞噬了…</h2>
+        <p>城市再次陷入死寂，但你战斗到了最后一刻。</p>
+        <div class="zfps-stats" id="stats-over"></div>
+        <button class="zfps-btn" id="btn-restart-over" type="button">重新突围</button>
+        <button class="zfps-btn sec" id="btn-menu-over" type="button">返回大厅</button>
+      </div>
+    </div>
+
+    <!-- 胜利结算 -->
+    <div class="zfps-screen zfps-hidden" id="screen-victory">
+      <div class="zfps-panel">
+        <h2>突围成功！</h2>
+        <p>你杀穿了尸潮！黎明的车灯就在前方，幸存者营地欢迎英雄归来。</p>
+        <div class="zfps-stats" id="stats-victory"></div>
+        <button class="zfps-btn" id="btn-restart-victory" type="button">再战一轮</button>
+        <button class="zfps-btn sec" id="btn-menu-victory" type="button">返回大厅</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/game.js"></script>
+</body>
+</html>
