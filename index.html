@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
   <title>末日突围 · ZOMBIE SIEGE</title>
 </head>
 <body>
@@ -13,6 +14,7 @@
     <div class="zfps-topbar" id="topbar">
       <div class="zfps-topbar-title">末日突围 · ZOMBIE SIEGE</div>
       <div class="zfps-topbar-actions">
+        <button class="zfps-mini-btn" id="btn-sound" type="button" aria-pressed="true">声音：开</button>
         <button class="zfps-mini-btn" id="btn-fullscreen" type="button">全屏</button>
         <button class="zfps-mini-btn" id="btn-close" type="button">返回大厅</button>
       </div>
@@ -31,22 +33,23 @@
           <div><b>鼠标</b><span>瞄准 / 转向</span></div>
           <div><b>左键</b><span>射击</span></div>
           <div><b>R</b><span>换弹</span></div>
-          <div><b>Esc</b><span>暂停</span></div>
+          <div><b>M</b><span>声音开关</span></div>
+          <div><b>Esc</b><span>暂停 / 退出</span></div>
         </div>
         <button class="zfps-btn" id="btn-start" type="button">开始突围</button>
-        <div class="zfps-note">开始后浏览器会锁定鼠标；爆头 3 倍伤害，击倒丧尸有概率掉落补给。</div>
+        <div class="zfps-note">声音默认开启；开始后浏览器会锁定鼠标。爆头 3 倍伤害，击倒丧尸有概率掉落补给。</div>
       </div>
     </div>
 
     <!-- 暂停 -->
     <div class="zfps-screen zfps-hidden" id="screen-paused">
       <div class="zfps-panel">
-        <h2>已暂停</h2>
-        <p>尸潮暂时停下了脚步，但你还没有突围成功。继续战斗，或者重整旗鼓。</p>
+        <h2>暂停 / 退出本局</h2>
+        <p>当前战斗已经暂停。你可以继续战斗，也可以结束本局并返回主菜单。</p>
         <button class="zfps-btn" id="btn-resume" type="button">继续战斗</button>
+        <button class="zfps-btn sec" id="btn-menu-paused" type="button">退出本局并返回主菜单</button>
         <button class="zfps-btn sec" id="btn-restart-paused" type="button">重新开始</button>
-        <button class="zfps-btn sec" id="btn-menu-paused" type="button">返回大厅</button>
-        <div class="zfps-note">继续战斗将重新锁定鼠标，请允许浏览器进行鼠标锁定。</div>
+        <div class="zfps-note">游戏中随时按 Esc 都会打开此菜单；继续战斗将重新锁定鼠标。</div>
       </div>
     </div>
 

@@ -43,23 +43,90 @@
   styleEl.textContent = CSS
   document.head.appendChild(styleEl)
 
-  // ============================ 音效（程序化合成，可选） ============================
+  // ============================ 音效（程序化合成） ============================
   function createAudio() {
     let ac = null
     let master = null
+    let ambience = null
+    let enabled = true
     try {
       if (typeof window === 'undefined') return null
       const AC = window.AudioContext || window.webkitAudioContext
       if (!AC) return null
+      function makeNoiseBuffer(seconds) {
+        const len = Math.max(1, Math.floor(ac.sampleRate * seconds))
+        const buf = ac.createBuffer(1, len, ac.sampleRate)
+        const d = buf.getChannelData(0)
+        let last = 0
+        for (let i = 0; i < len; i++) {
+          last = last * 0.82 + (Math.random() * 2 - 1) * 0.18
+          d[i] = last
+        }
+        return buf
+      }
+      function startAmbience() {
+        if (!ac || !master || ambience) return
+        try {
+          const bus = ac.createGain()
+          const wind = ac.createBufferSource()
+          const windHigh = ac.createBiquadFilter()
+          const windLow = ac.createBiquadFilter()
+          const windGain = ac.createGain()
+          const droneGain = ac.createGain()
+          const droneA = ac.createOscillator()
+          const droneB = ac.createOscillator()
+          const lfo = ac.createOscillator()
+          const lfoGain = ac.createGain()
+          bus.gain.value = 0.42
+          wind.buffer = makeNoiseBuffer(4)
+          wind.loop = true
+          windHigh.type = 'highpass'
+          windHigh.frequency.value = 70
+          windLow.type = 'lowpass'
+          windLow.frequency.value = 760
+          windGain.gain.value = 0.12
+          droneA.type = 'sine'
+          droneA.frequency.value = 43
+          droneB.type = 'triangle'
+          droneB.frequency.value = 56
+          droneGain.gain.value = 0.035
+          lfo.type = 'sine'
+          lfo.frequency.value = 0.08
+          lfoGain.gain.value = 0.025
+          wind.connect(windHigh)
+          windHigh.connect(windLow)
+          windLow.connect(windGain)
+          windGain.connect(bus)
+          droneA.connect(droneGain)
+          droneB.connect(droneGain)
+          droneGain.connect(bus)
+          lfo.connect(lfoGain)
+          lfoGain.connect(windGain.gain)
+          bus.connect(master)
+          wind.start()
+          droneA.start()
+          droneB.start()
+          lfo.start()
+          ambience = { bus, wind, droneA, droneB, lfo }
+        } catch (e) {}
+      }
       function ensure() {
         try {
           if (!ac) {
             ac = new AC()
             master = ac.createGain()
-            master.gain.value = 0.3
-            master.connect(ac.destination)
+            const limiter = ac.createDynamicsCompressor()
+            limiter.threshold.value = -12
+            limiter.knee.value = 18
+            limiter.ratio.value = 8
+            limiter.attack.value = 0.003
+            limiter.release.value = 0.22
+            master.gain.value = enabled ? 0.46 : 0.0001
+            master.connect(limiter)
+            limiter.connect(ac.destination)
+            startAmbience()
           }
-          if (ac.state === 'suspended') ac.resume()
+          if (enabled && ac.state === 'suspended') ac.resume()
         } catch (e) {}
       }
       function tone(f0, f1, dur, type, vol, when) {
@@ -83,10 +150,9 @@
         if (!ac || !master) return
         try {
           const t = ac.currentTime + (when || 0)
-          const len = Math.max(1, Math.floor(ac.sampleRate * dur))
-          const buf = ac.createBuffer(1, len, ac.sampleRate)
+          const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate)
           const d = buf.getChannelData(0)
-          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+          for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
           const src = ac.createBufferSource()
           src.buffer = buf
           const f = ac.createBiquadFilter()
@@ -103,17 +169,30 @@
       }
       return {
         ensure,
-        shot() { tone(160, 40, 0.12, 'square', 0.5); noise(0.09, 0.4, 2200) },
-        zombieHit() { tone(220, 90, 0.09, 'sawtooth', 0.3) },
-        headshot() { tone(300, 60, 0.14, 'sawtooth', 0.35); noise(0.1, 0.3, 1600) },
-        reload() { tone(500, 300, 0.06, 'square', 0.2, 0); tone(360, 200, 0.06, 'square', 0.2, 0.35); tone(700, 420, 0.06, 'square', 0.22, 0.9) },
-        empty() { tone(900, 700, 0.04, 'square', 0.15) },
-        zombieDie() { tone(150, 40, 0.5, 'sawtooth', 0.32) },
-        hurt() { tone(120, 70, 0.18, 'square', 0.4); noise(0.12, 0.25, 900) },
+        isEnabled() { return enabled },
+        toggle() {
+          enabled = !enabled
+          if (enabled) ensure()
+          if (ac && master) {
+            const t = ac.currentTime
+            master.gain.cancelScheduledValues(t)
+            master.gain.setValueAtTime(Math.max(master.gain.value, 0.0001), t)
+            master.gain.exponentialRampToValueAtTime(enabled ? 0.46 : 0.0001, t + 0.08)
+          }
+          return enabled
+        },
+        shot() { tone(190, 38, 0.15, 'square', 0.62); tone(980, 260, 0.035, 'square', 0.2); noise(0.12, 0.78, 4200) },
+        zombieHit() { tone(240, 82, 0.11, 'sawtooth', 0.32); noise(0.045, 0.16, 1250) },
+        headshot() { tone(360, 55, 0.16, 'sawtooth', 0.42); noise(0.12, 0.42, 1800) },
+        reload() { tone(620, 260, 0.055, 'square', 0.2, 0); noise(0.04, 0.16, 2200, 0.34); tone(420, 190, 0.07, 'square', 0.2, 0.36); tone(920, 460, 0.055, 'square', 0.24, 1.02) },
+        empty() { tone(1200, 620, 0.045, 'square', 0.2); noise(0.025, 0.08, 3000) },
+        zombieDie() { tone(155, 36, 0.62, 'sawtooth', 0.34); noise(0.2, 0.14, 600, 0.12) },
+        hurt() { tone(130, 58, 0.2, 'square', 0.44); noise(0.15, 0.32, 980) },
         pickup() { tone(520, 880, 0.1, 'triangle', 0.25); tone(780, 1180, 0.12, 'triangle', 0.22, 0.08) },
         wave() { tone(200, 420, 0.4, 'triangle', 0.3); tone(300, 630, 0.5, 'triangle', 0.22, 0.15) },
         death() { tone(90, 30, 1.2, 'sawtooth', 0.5); noise(0.8, 0.3, 400) },
-        growl() { tone(70, 45, 0.7, 'sawtooth', 0.12); tone(58, 38, 0.8, 'sawtooth', 0.1, 0.1) },
+        growl() { tone(76, 38, 0.8, 'sawtooth', 0.16); tone(58, 31, 0.9, 'square', 0.07, 0.08) },
+        step(sprint) { noise(0.075, sprint ? 0.2 : 0.14, 520); tone(74, 48, 0.07, 'sine', sprint ? 0.11 : 0.08) },
       }
     } catch (e) {
       return null
@@ -121,6 +200,19 @@
   }
 
   const audio = createAudio()
+
+  function updateAudioUI() {
+    const btn = document.getElementById('btn-sound')
+    if (!btn) return
+    const on = !!(audio && audio.isEnabled())
+    btn.textContent = audio ? (on ? '声音：开' : '声音：关') : '声音：不可用'
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+  }
+
+  function toggleAudio() {
+    if (audio) audio.toggle()
+    updateAudioUI()
+  }
 
   // ============================ 界面 ============================
   const canvas = document.getElementById('game-canvas')
@@ -168,11 +260,16 @@
   // ============================ 游戏引擎 ============================
   function createEngine(canvas, hooks) {
     const TAU = Math.PI * 2
-    const MAG = 12
+    const MAG = 30
+    const RELOAD_TIME = 1.75
     const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
     const rand = (a, b) => a + Math.random() * (b - a)
     const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
     const normAngle = (a) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a }
+    const seeded = (seed, salt) => {
+      const n = Math.sin(seed * 91.73 + salt * 37.19) * 43758.5453
+      return n - Math.floor(n)
+    }
     const SKINS = ['#7d9b6a', '#8aa86f', '#6f8f5f', '#93a97a']
     const SHIRTS = ['#3a2f33', '#4a3a2e', '#2e3430', '#4d3320']
     const PANTS = ['#23252b', '#2b2420', '#1f2730']
@@ -186,24 +283,46 @@
     const W = {
       phase: 'menu', px: 0, pz: 0, yaw: Math.PI * 0.75, pitch: 0,
       hp: 100, ammo: MAG, reserve: 60, kills: 0, score: 0, headshots: 0, wave: 1, camH: 1.6,
-      zombies: [], particles: [], floats: [], decals: [], pickups: [], props: [], smoke: [], ash: [], ashW: 0, ashH: 0,
-      spawnQueue: 0, spawnCd: 1.2, waveCleared: false, waveDelay: 0,
+      zombies: [], particles: [], weaponFx: [], floats: [], decals: [], pickups: [], props: [], smoke: [], ash: [], ashW: 0, ashH: 0,
+      spawnQueue: 0, spawnCd: 1.2, waveCleared: false, waveDelay: 0, supplyCd: 9,
       reloading: false, reloadT: 0, reloadDelay: 0, fireCd: 0, firing: false,
       keys: {}, moving: false, shake: 0, dmgFlash: 0, hitT: 0, flashT: 0, recoil: 0,
       dead: false, deathT: 0, time: 0, locked: false,
-      bannerText: '', bannerT: 0, bannerMax: 0, emptyT: 0, growlCd: 3,
+      bannerText: '', bannerT: 0, bannerMax: 0, emptyT: 0, growlCd: 3, footstepCd: 0,
+      gunMuzzleX: 0, gunMuzzleY: 0, gunEjectX: 0, gunEjectY: 0,
       cw: 0, ch: 0, _dt: 0, _focal: 0, _cx: 0, _cy: 0, _horizon: 0,
     }
 
     let loopTimer = null
     let lastT = Date.now()
+    const weaponImage = new Image()
+    let weaponImageReady = false
+    weaponImage.onload = () => { weaponImageReady = true }
+    weaponImage.src = 'assets/m4a1-first-person.png'
 
     function buildWorld() {
       W.props = []
-      for (let i = 0; i < 34; i++) {
-        const ang = rand(0, TAU)
-        const r = rand(52, 96)
-        W.props.push({ x: Math.cos(ang) * r, z: Math.sin(ang) * r, w: rand(10, 26), h: rand(9, 26), c: pick(['#171018', '#1c1018', '#150e16']), seed: i })
+      const buildingKinds = ['apartment', 'office', 'shop', 'tower']
+      const facades = ['#34272d', '#3a3037', '#3b2927', '#2c3337', '#403128']
+      const signs = ['24H', 'MOTEL', '急救', 'CAFE', 'EXIT', '药']
+      for (let i = 0; i < 42; i++) {
+        const ang = (i / 42) * TAU + rand(-0.075, 0.075)
+        const r = rand(55, 94)
+        const kind = buildingKinds[i % buildingKinds.length]
+        const tower = kind === 'tower'
+        const shop = kind === 'shop'
+        W.props.push({
+          x: Math.cos(ang) * r,
+          z: Math.sin(ang) * r,
+          w: tower ? rand(11, 17) : rand(13, 27),
+          h: shop ? rand(8, 13) : tower ? rand(25, 38) : rand(15, 29),
+          c: pick(facades),
+          kind,
+          roof: i % 4,
+          damage: seeded(i, 4),
+          sign: signs[i % signs.length],
+          seed: i + 1,
+        })
       }
       W.decals = []
       for (let i = 0; i < 46; i++) {
@@ -246,12 +365,12 @@
 
     function resetWorld(menu) {
       W.px = 0; W.pz = 0; W.yaw = Math.PI * 0.75; W.pitch = 0
-      W.hp = 100; W.ammo = MAG; W.reserve = 60
+      W.hp = 100; W.ammo = MAG; W.reserve = 90
       W.kills = 0; W.score = 0; W.headshots = 0; W.wave = 1
-      W.zombies = []; W.particles = []; W.floats = []; W.pickups = []
-      W.spawnQueue = 0; W.spawnCd = 1.2; W.waveCleared = false; W.waveDelay = 0
+      W.zombies = []; W.particles = []; W.weaponFx = []; W.floats = []; W.pickups = []
+      W.spawnQueue = 0; W.spawnCd = 1.2; W.waveCleared = false; W.waveDelay = 0; W.supplyCd = rand(7, 11)
       W.reloading = false; W.reloadT = 0; W.reloadDelay = 0; W.fireCd = 0; W.firing = false
-      W.dead = false; W.deathT = 0; W.dmgFlash = 0; W.shake = 0; W.hitT = 0; W.flashT = 0; W.recoil = 0; W.emptyT = 0
+      W.dead = false; W.deathT = 0; W.dmgFlash = 0; W.shake = 0; W.hitT = 0; W.flashT = 0; W.recoil = 0; W.emptyT = 0; W.footstepCd = 0
       if (menu) {
         for (let i = 0; i < 9; i++) spawnZombie(rand(13, 27))
       } else {
@@ -323,13 +442,22 @@
     }
 
     function shoot() {
-      W.fireCd = 0.24
+      W.fireCd = 0.105
       W.ammo--
       W.flashT = 0.055
       W.recoil = 1
       W.shake = Math.min(1, W.shake + 0.22)
-      W.pitch = clamp(W.pitch + 0.0055, -1.05, 1.05)
+      W.pitch = clamp(W.pitch + 0.0038, -1.05, 1.05)
       audio && audio.shot()
+      const gunU = W.ch / 560
+      const ejectX = W.gunEjectX || W.cw * 0.72
+      const ejectY = W.gunEjectY || W.ch * 0.66
+      const muzzleX = W.gunMuzzleX || W.cw * 0.62
+      const muzzleY = W.gunMuzzleY || W.ch * 0.64
+      W.weaponFx.push({ kind: 'casing', x: ejectX, y: ejectY, vx: rand(120, 210) * gunU, vy: rand(-190, -115) * gunU, g: 520 * gunU, rot: rand(0, TAU), vr: rand(9, 16), life: 0.72, maxLife: 0.72 })
+      for (let i = 0; i < 3; i++) {
+        W.weaponFx.push({ kind: 'smoke', x: muzzleX + rand(-3, 3) * gunU, y: muzzleY, vx: rand(-24, -6) * gunU, vy: rand(-46, -18) * gunU, g: -8, size: rand(5, 10) * gunU, life: rand(0.28, 0.48), maxLife: 0.48 })
+      }
       if (W.ammo <= 0) W.reloadDelay = 0.5
       let best = null
       let bestDepth = Infinity
@@ -357,7 +485,7 @@
       }
       if (best) {
         const head = bestHit >= best.h * 0.82
-        const dmg = head ? 66 : 22
+        const dmg = head ? 90 : 30
         best.hp -= dmg
         best.hitFlash = 0.14
         if (best.wounds.length < 6) best.wounds.push({ dx: rand(-0.28, 0.28), dy: rand(-0.95, -0.15), r: rand(0.05, 0.12) })
@@ -448,6 +576,20 @@
       W.zombies = W.zombies.filter((z) => !(z.dead && z.fallT >= 1))
     }
 
+    function spawnSupply(forcedKind) {
+      const ang = rand(0, TAU)
+      const dist = rand(8, 18)
+      const kind = forcedKind || (W.hp < 48 && Math.random() < 0.68 ? 'med' : (Math.random() < 0.64 ? 'ammo' : 'med'))
+      W.pickups.push({
+        x: clamp(W.px + Math.cos(ang) * dist, -42, 42),
+        z: clamp(W.pz + Math.sin(ang) * dist, -42, 42),
+        kind,
+        bob: rand(0, 6),
+        taken: false,
+      })
+      addFloat(kind === 'ammo' ? '弹药补给已投放' : '医疗补给已投放', W.cw / 2, W.ch * 0.34, kind === 'ammo' ? '#9fc8ff' : '#7dffa0')
+    }
+
     function updatePickups(dt) {
       for (const p of W.pickups) {
         p.bob += dt * 3
@@ -455,8 +597,8 @@
         if (d < 1.5) {
           p.taken = true
           if (p.kind === 'ammo') {
-            W.reserve = Math.min(120, W.reserve + 18)
-            addFloat('+18 弹药', W.cw / 2, W.ch * 0.4, '#9fc8ff')
+            W.reserve = Math.min(120, W.reserve + 30)
+            addFloat('+30 弹药', W.cw / 2, W.ch * 0.4, '#9fc8ff')
           } else {
             W.hp = Math.min(100, W.hp + 30)
             addFloat('+30 生命', W.cw / 2, W.ch * 0.4, '#7dffa0')
@@ -475,6 +617,14 @@
         p.life -= dt
       }
       W.particles = W.particles.filter((p) => p.life > 0)
+      for (const p of W.weaponFx) {
+        p.vy += p.g * dt
+        p.x += p.vx * dt
+        p.y += p.vy * dt
+        if (p.rot != null) p.rot += p.vr * dt
+        p.life -= dt
+      }
+      W.weaponFx = W.weaponFx.filter((p) => p.life > 0 && p.y < W.ch + 30)
       for (const f of W.floats) {
         f.y -= 26 * dt
         f.life -= dt
@@ -511,6 +661,14 @@
         }
         return
       }
+      const ammoOnGround = W.pickups.some((p) => !p.taken && p.kind === 'ammo')
+      const emergencyAmmo = W.ammo === 0 && W.reserve === 0 && !ammoOnGround
+      if (emergencyAmmo) W.supplyCd = Math.min(W.supplyCd, 2)
+      W.supplyCd -= dt
+      if (W.supplyCd <= 0) {
+        if (emergencyAmmo || W.pickups.length < 3) spawnSupply(emergencyAmmo ? 'ammo' : null)
+        W.supplyCd = rand(9, 16)
+      }
       if (audio) {
         let near = false
         for (const z of W.zombies) {
@@ -543,6 +701,13 @@
         const speed = sprint ? 7.4 : 4.6
         W.px = clamp(W.px + (s * mz - c * mx) * speed * dt, -46, 46)
         W.pz = clamp(W.pz + (c * mz + s * mx) * speed * dt, -46, 46)
+        W.footstepCd -= dt
+        if (W.footstepCd <= 0) {
+          W.footstepCd = sprint ? 0.28 : 0.42
+          audio && audio.step(sprint)
+        }
+      } else {
+        W.footstepCd = Math.min(W.footstepCd, 0.06)
       }
       // 射击
       if (W.fireCd > 0) W.fireCd -= dt
@@ -563,7 +728,7 @@
       }
       if (W.reloading) {
         W.reloadT += dt
-        if (W.reloadT >= 1.35) finishReload()
+        if (W.reloadT >= RELOAD_TIME) finishReload()
       }
       // 出怪
       if (W.spawnQueue > 0) {
@@ -623,7 +788,7 @@
     function drawGrid(g) {
       const span = 44
       const step = 4
-      g.strokeStyle = 'rgba(120,90,70,0.15)'
+      g.strokeStyle = 'rgba(156,118,88,0.22)'
       g.lineWidth = 1
       g.beginPath()
       for (let k = -span; k <= span; k += step) {
@@ -648,43 +813,182 @@
     }
 
     function drawProps(g) {
+      const visible = []
       for (const b of W.props) {
         const p = project(b.x, b.z, 0)
-        if (!p.visible || p.depth > 120) continue
+        if (p.visible && p.depth < 120) visible.push({ b, p })
+      }
+      visible.sort((a, b) => b.p.depth - a.p.depth)
+      for (const item of visible) {
+        const b = item.b
+        const p = item.p
         const wpx = b.w * p.scale
         const hpx = b.h * p.scale
         const x0 = p.sx - wpx / 2
         const y0 = p.sy - hpx
         const fog = clamp((p.depth - 12) / 70, 0, 0.9)
-        g.fillStyle = b.c
-        g.globalAlpha = 1 - fog * 0.6
-        g.fillRect(x0, y0, wpx, hpx)
-        if (fog < 0.5 && p.depth < 42) {
-          const cols = clamp(Math.round(b.w / 5), 2, 5)
-          const rows = clamp(Math.round(b.h / 6), 2, 5)
-          const cw = wpx / cols
-          const ch = hpx / rows
-          const a = (1 - fog) * 0.5
+        const alpha = 1 - fog * 0.58
+        const sideDir = p.rel > 0 ? -1 : 1
+        const sideW = clamp(wpx * 0.11, 4, wpx * 0.18)
+        const chip = b.damage > 0.7 ? Math.min(hpx * 0.075, 28) : 0
+        g.save()
+        g.globalAlpha = alpha
+
+        // 屋顶轮廓：水箱、天线、机房和坍塌女儿墙让天际线不再是方盒子。
+        g.fillStyle = '#121116'
+        if (b.roof === 0) {
+          const ax = p.sx + sideDir * wpx * 0.18
+          g.lineWidth = Math.max(1, p.scale * 0.06)
+          g.strokeStyle = '#30282b'
+          g.beginPath()
+          g.moveTo(ax, y0)
+          g.lineTo(ax, y0 - Math.min(42, hpx * 0.14))
+          g.moveTo(ax - 8, y0 - Math.min(27, hpx * 0.09))
+          g.lineTo(ax + 8, y0 - Math.min(27, hpx * 0.09))
+          g.stroke()
+          g.fillStyle = 'rgba(180,45,30,0.55)'
+          g.beginPath()
+          g.arc(ax, y0 - Math.min(42, hpx * 0.14), Math.max(1.5, p.scale * 0.12), 0, TAU)
+          g.fill()
+        } else if (b.roof === 1) {
+          const rw = Math.min(wpx * 0.27, 44)
+          const rh = Math.min(hpx * 0.1, 30)
+          g.fillStyle = '#19191c'
+          g.fillRect(p.sx - rw / 2, y0 - rh, rw, rh)
+          g.fillStyle = '#303035'
+          g.beginPath()
+          g.ellipse(p.sx, y0 - rh, rw / 2, Math.max(2, rh * 0.2), 0, 0, TAU)
+          g.fill()
+          g.fillStyle = '#0d0e10'
+          g.fillRect(p.sx - rw * 0.37, y0, 3, Math.min(12, p.scale))
+          g.fillRect(p.sx + rw * 0.34, y0, 3, Math.min(12, p.scale))
+        } else if (b.roof === 2) {
+          const rw = Math.min(wpx * 0.34, 58)
+          const rh = Math.min(hpx * 0.08, 22)
+          g.fillStyle = '#17171b'
+          g.fillRect(p.sx - rw / 2, y0 - rh, rw, rh)
+          g.strokeStyle = 'rgba(255,255,255,0.1)'
+          g.lineWidth = 1
+          for (let k = -1; k <= 1; k++) {
+            g.beginPath()
+            g.moveTo(p.sx - rw * 0.34, y0 - rh * (0.25 + k * 0.18))
+            g.lineTo(p.sx + rw * 0.34, y0 - rh * (0.25 + k * 0.18))
+            g.stroke()
+          }
+        }
+
+        // 侧墙和主体采用不同明度，形成可读的立体体块。
+        g.fillStyle = darken(b.c, 0.68)
+        g.beginPath()
+        if (sideDir > 0) {
+          g.moveTo(x0 + wpx, y0)
+          g.lineTo(x0 + wpx + sideW, y0 + sideW * 0.38)
+          g.lineTo(x0 + wpx + sideW, p.sy)
+          g.lineTo(x0 + wpx, p.sy)
+        } else {
+          g.moveTo(x0, y0)
+          g.lineTo(x0 - sideW, y0 + sideW * 0.38)
+          g.lineTo(x0 - sideW, p.sy)
+          g.lineTo(x0, p.sy)
+        }
+        g.closePath()
+        g.fill()
+
+        const facade = g.createLinearGradient(x0, y0, x0 + wpx, p.sy)
+        facade.addColorStop(0, darken(b.c, 0.86))
+        facade.addColorStop(0.45, b.c)
+        facade.addColorStop(1, darken(b.c, 0.76))
+        g.fillStyle = facade
+        g.beginPath()
+        g.moveTo(x0, y0 + chip)
+        if (chip) {
+          g.lineTo(x0 + chip * 0.5, y0 + chip * 0.35)
+          g.lineTo(x0 + chip, y0)
+        }
+        g.lineTo(x0 + wpx, y0)
+        g.lineTo(x0 + wpx, p.sy)
+        g.lineTo(x0, p.sy)
+        g.closePath()
+        g.fill()
+
+        // 楼板、立柱与窗格。
+        const cols = clamp(Math.round(b.w / (b.kind === 'office' ? 3.3 : 4.3)), 3, 8)
+        const rows = clamp(Math.round(b.h / (b.kind === 'shop' ? 4.8 : 4.1)), 2, 9)
+        const cw = wpx / cols
+        const ch = hpx / rows
+        g.fillStyle = 'rgba(255,255,255,0.035)'
+        for (let j = 1; j < rows; j++) g.fillRect(x0, y0 + j * ch - 1, wpx, Math.max(1, p.scale * 0.055))
+        if (cw > 5 && ch > 6) {
           for (let i = 0; i < cols; i++) {
             for (let j = 0; j < rows; j++) {
-              const v = ((b.seed * 37 + i * 13 + j * 7) % 100) / 100
-              if (v < 0.3) {
-                g.globalAlpha = a
-                g.fillStyle = 'rgba(255,170,90,0.42)'
-                g.fillRect(x0 + (i + 0.35) * cw, y0 + (j + 0.4) * ch, cw * 0.28, ch * 0.26)
+              const v = seeded(b.seed + i * 3, j + 11)
+              const wx = x0 + (i + 0.2) * cw
+              const wy = y0 + (j + 0.22) * ch
+              const ww = cw * 0.58
+              const wh = ch * 0.5
+              g.fillStyle = v < 0.15 ? 'rgba(238,139,69,0.5)' : v < 0.23 ? 'rgba(150,194,193,0.24)' : 'rgba(5,8,12,0.7)'
+              g.fillRect(wx, wy, ww, wh)
+              g.strokeStyle = 'rgba(164,154,146,0.15)'
+              g.lineWidth = Math.max(0.6, p.scale * 0.025)
+              g.strokeRect(wx, wy, ww, wh)
+              if (v > 0.78 && v < 0.9) {
+                g.strokeStyle = 'rgba(196,181,163,0.42)'
+                g.beginPath()
+                g.moveTo(wx + ww * 0.08, wy + wh * 0.86)
+                g.lineTo(wx + ww * 0.9, wy + wh * 0.2)
+                g.moveTo(wx + ww * 0.14, wy + wh * 0.18)
+                g.lineTo(wx + ww * 0.82, wy + wh * 0.9)
+                g.stroke()
+              } else if (v >= 0.9) {
+                g.fillStyle = 'rgba(77,58,48,0.95)'
+                g.fillRect(wx - ww * 0.04, wy + wh * 0.18, ww * 1.08, Math.max(2, wh * 0.18))
+                g.fillRect(wx - ww * 0.04, wy + wh * 0.64, ww * 1.08, Math.max(2, wh * 0.18))
               }
             }
           }
-          g.globalAlpha = 1 - fog * 0.6
-          g.fillStyle = 'rgba(255,255,255,0.05)'
-          g.fillRect(x0, y0, wpx, Math.max(1, hpx * 0.02))
         }
+
+        // 临街招牌与入口，为建筑提供尺度参照。
+        if ((b.kind === 'shop' || b.seed % 5 === 0) && p.depth < 92 && wpx > 70) {
+          const sw = Math.min(wpx * 0.55, 130)
+          const sh = clamp(ch * 0.42, 12, 24)
+          const sx = p.sx - sw / 2
+          const sy = p.sy - ch * 1.05
+          g.fillStyle = 'rgba(25,8,10,0.94)'
+          g.fillRect(sx, sy, sw, sh)
+          g.strokeStyle = 'rgba(255,91,55,0.62)'
+          g.lineWidth = 1.5
+          g.strokeRect(sx, sy, sw, sh)
+          g.font = '700 ' + Math.max(9, sh * 0.55) + 'px system-ui, sans-serif'
+          g.textAlign = 'center'
+          g.textBaseline = 'middle'
+          g.fillStyle = seeded(b.seed, 33) > 0.35 ? 'rgba(255,126,82,0.9)' : 'rgba(255,126,82,0.28)'
+          g.fillText(b.sign, p.sx, sy + sh * 0.53)
+          g.textBaseline = 'alphabetic'
+        }
+
+        // 结构裂缝和焦黑面，强化末日损毁感。
+        if (b.damage > 0.45 && p.depth < 86) {
+          const crackX = x0 + wpx * (0.24 + seeded(b.seed, 41) * 0.48)
+          const crackY = y0 + hpx * 0.16
+          g.strokeStyle = 'rgba(5,4,5,0.48)'
+          g.lineWidth = clamp(p.scale * 0.05, 1, 3)
+          g.beginPath()
+          g.moveTo(crackX, crackY)
+          g.lineTo(crackX - cw * 0.18, crackY + ch * 0.48)
+          g.lineTo(crackX + cw * 0.13, crackY + ch * 0.86)
+          g.lineTo(crackX - cw * 0.08, crackY + ch * 1.3)
+          g.moveTo(crackX - cw * 0.17, crackY + ch * 0.5)
+          g.lineTo(crackX - cw * 0.42, crackY + ch * 0.7)
+          g.stroke()
+        }
+
         if (fog > 0.12) {
-          g.fillStyle = '#2c1817'
-          g.globalAlpha = fog * 0.7
+          g.fillStyle = '#4a2a24'
+          g.globalAlpha = fog * 0.48
           g.fillRect(x0, y0, wpx, hpx)
         }
-        g.globalAlpha = 1
+        g.restore()
       }
     }
 
@@ -1060,58 +1364,86 @@
     }
 
     function drawGun(g) {
+      if (!weaponImageReady) return
       const w = W.cw
       const h = W.ch
-      const u = h / 520
+      const u = h / 720
       const t = W.time
-      const bob = W.moving ? Math.sin(t * 11) * 5 * u : Math.sin(t * 2.2) * 1.6 * u
-      const kick = W.recoil * 20 * u
-      const gx = w * 0.68
-      const gy = h + 30 * u - bob - kick
-      const reloadDip = W.reloading ? Math.sin(clamp(W.reloadT / 1.35, 0, 1) * Math.PI) * h * 0.18 : 0
+      const scale = Math.min(w / weaponImage.naturalWidth, h / weaponImage.naturalHeight) * 0.82
+      const dw = weaponImage.naturalWidth * scale
+      const dh = weaponImage.naturalHeight * scale
+      const bobX = W.moving ? Math.cos(t * 5.5) * 6 * u : Math.sin(t * 1.5) * 1.5 * u
+      const bobY = W.moving ? Math.sin(t * 11) * 5 * u : Math.sin(t * 2.1) * 1.4 * u
+      const reloadP = W.reloading ? clamp(W.reloadT / RELOAD_TIME, 0, 1) : 0
+      const reloadArc = Math.sin(reloadP * Math.PI)
+      const x = w - dw + bobX + W.recoil * 5 * u
+      const y = h - dh + bobY + W.recoil * 9 * u + reloadArc * h * 0.065
+      const pivotX = w - 26
+      const pivotY = h + 18
+      const muzzleX = x + dw * 0.558
+      const muzzleY = y + dh * 0.51
+      W.gunMuzzleX = muzzleX
+      W.gunMuzzleY = muzzleY
+      W.gunEjectX = x + dw * 0.72
+      W.gunEjectY = y + dh * 0.64
+
       g.save()
-      g.translate(gx, gy + reloadDip)
-      g.rotate((W.moving ? Math.sin(t * 11) * 0.012 : 0) + W.recoil * 0.035 - (W.reloading ? 0.2 * Math.sin(clamp(W.reloadT / 1.35, 0, 1) * Math.PI) : 0))
-      g.fillStyle = '#1d1f24'
-      g.fillRect(-30 * u, -46 * u, 88 * u, 26 * u)
-      g.fillStyle = '#2c2f36'
-      g.fillRect(58 * u, -44 * u, 34 * u, 18 * u)
-      g.fillStyle = '#0e0f12'
-      g.fillRect(92 * u, -42 * u, 8 * u, 14 * u)
-      g.fillStyle = '#2a2018'
-      g.save()
-      g.translate(6 * u, -22 * u)
-      g.rotate(0.35)
-      g.fillRect(-14 * u, 0, 26 * u, 54 * u)
-      g.restore()
-      g.strokeStyle = '#1a1c20'
-      g.lineWidth = 3 * u
-      g.beginPath()
-      g.arc(18 * u, -18 * u, 12 * u, 0, Math.PI)
-      g.stroke()
-      g.fillStyle = 'rgba(255,255,255,0.06)'
-      g.fillRect(-26 * u, -44 * u, 80 * u, 8 * u)
-      g.fillStyle = '#3a3d44'
-      g.fillRect(-16 * u, -50 * u, 6 * u, 6 * u)
-      g.fillRect(56 * u, -50 * u, 6 * u, 6 * u)
-      g.restore()
+      g.translate(pivotX, pivotY)
+      g.rotate(W.recoil * 0.012 + reloadArc * 0.07)
+      g.translate(-pivotX, -pivotY)
+      g.drawImage(weaponImage, x, y, dw, dh)
+
       if (W.flashT > 0) {
         const fs = W.flashT / 0.055
-        const fx = gx + 96 * u
-        const fy = gy - 40 * u
-        g.fillStyle = 'rgba(255,214,120,' + fs.toFixed(3) + ')'
+        g.save()
+        g.globalCompositeOperation = 'lighter'
+        const glow = g.createRadialGradient(muzzleX, muzzleY, 2, muzzleX, muzzleY, 38 * u)
+        glow.addColorStop(0, 'rgba(255,250,207,' + fs.toFixed(3) + ')')
+        glow.addColorStop(0.32, 'rgba(255,157,48,' + (fs * 0.78).toFixed(3) + ')')
+        glow.addColorStop(1, 'rgba(255,63,10,0)')
+        g.fillStyle = glow
         g.beginPath()
-        g.arc(fx, fy, (10 + 16 * fs) * u, 0, TAU)
+        g.arc(muzzleX, muzzleY, 38 * u, 0, TAU)
         g.fill()
-        g.strokeStyle = 'rgba(255,150,60,' + fs.toFixed(3) + ')'
-        g.lineWidth = 3 * u
+
+        const aimAngle = Math.atan2(h * 0.5 - muzzleY, w * 0.5 - muzzleX)
+        g.translate(muzzleX, muzzleY)
+        g.rotate(aimAngle)
+        g.fillStyle = 'rgba(255,241,154,' + fs.toFixed(3) + ')'
         g.beginPath()
-        for (let i = 0; i < 6; i++) {
-          const a = i / 6 * TAU + 0.3
-          g.moveTo(fx, fy)
-          g.lineTo(fx + Math.cos(a) * 30 * u, fy + Math.sin(a) * 30 * u)
+        g.moveTo(0, 0)
+        g.lineTo(70 * u, -15 * u)
+        g.lineTo(43 * u, 0)
+        g.lineTo(74 * u, 14 * u)
+        g.lineTo(31 * u, 8 * u)
+        g.closePath()
+        g.fill()
+        g.restore()
+      }
+      g.restore()
+    }
+
+    function drawWeaponFx(g) {
+      for (const p of W.weaponFx) {
+        const a = clamp(p.life / p.maxLife, 0, 1)
+        if (p.kind === 'smoke') {
+          g.fillStyle = 'rgba(192,184,174,' + (a * 0.18).toFixed(3) + ')'
+          g.beginPath()
+          g.arc(p.x, p.y, p.size * (1.35 - a * 0.35), 0, TAU)
+          g.fill()
+        } else {
+          g.save()
+          g.globalAlpha = a
+          g.translate(p.x, p.y)
+          g.rotate(p.rot)
+          g.fillStyle = '#b8863c'
+          g.fillRect(-5, -2, 10, 4)
+          g.fillStyle = '#e3bd67'
+          g.beginPath()
+          g.ellipse(5, 0, 2, 2, 0, 0, TAU)
+          g.fill()
+          g.restore()
         }
-        g.stroke()
       }
     }
 
@@ -1120,13 +1452,13 @@
       const h = W.ch
       const hp = Math.max(0, W.hp)
       const bx = 24
-      const by = 22
-      const bw = 230
-      const bh = 15
+      const by = h - 38
+      const bw = 210
+      const bh = 14
       g.textAlign = 'left'
       g.font = '600 13px system-ui, sans-serif'
       g.fillStyle = '#f2e6dc'
-      g.fillText('生命 ' + Math.ceil(hp) + ' / 100', bx, by - 6)
+      g.fillText('生命  ' + Math.ceil(hp), bx, by - 7)
       g.fillStyle = 'rgba(12,10,12,0.55)'
       g.fillRect(bx - 2, by - 2, bw + 4, bh + 4)
       g.fillStyle = 'rgba(30,26,30,0.85)'
@@ -1137,26 +1469,28 @@
       g.strokeStyle = 'rgba(255,255,255,0.22)'
       g.lineWidth = 1
       g.strokeRect(bx, by, bw, bh)
-      const ax = 26
-      const ay = h - 40
+      const ax = w - 26
+      const ay = h - 38
+      g.textAlign = 'right'
+      g.fillStyle = 'rgba(8,10,12,0.38)'
+      g.fillRect(ax - 216, ay - 48, 216, 74)
       g.font = '700 38px system-ui, sans-serif'
       g.fillStyle = (W.ammo === 0 && !W.reloading) ? '#ff5a38' : '#f2e6dc'
-      g.fillText(String(W.ammo), ax, ay)
+      g.fillText(String(W.ammo), ax - 68, ay)
       g.font = '600 17px system-ui, sans-serif'
       g.fillStyle = '#9a8f88'
-      g.fillText('/ ' + W.reserve, ax + 56, ay)
+      g.fillText('/ ' + W.reserve, ax, ay)
       g.font = '600 12px system-ui, sans-serif'
       g.fillStyle = '#8d827a'
-      g.fillText('手枪 · R 换弹', ax, ay + 20)
+      g.fillText('M4A1 · 自动 · R 换弹 · M 声音', ax, ay + 20)
       if (W.reloading) {
-        const pr = clamp(W.reloadT / 1.35, 0, 1)
+        const pr = clamp(W.reloadT / RELOAD_TIME, 0, 1)
         g.fillStyle = 'rgba(255,255,255,0.16)'
-        g.fillRect(ax, ay + 30, 120, 6)
+        g.fillRect(ax - 150, ay - 62, 150, 6)
         g.fillStyle = '#ffb199'
-        g.fillRect(ax, ay + 30, 120 * pr, 6)
-        g.fillText('换弹中…', ax, ay + 50)
+        g.fillRect(ax - 150, ay - 62, 150 * pr, 6)
+        g.fillText('换弹中…', ax, ay - 68)
       }
-      g.textAlign = 'right'
       g.font = '700 20px system-ui, sans-serif'
       g.fillStyle = '#ffb199'
       g.fillText('第 ' + W.wave + ' 波', w - 26, 36)
@@ -1166,15 +1500,18 @@
       const remaining = W.spawnQueue + W.zombies.filter((z) => !z.dead).length
       g.fillText('剩余丧尸 ' + remaining, w - 26, 78)
       g.textAlign = 'center'
+      g.font = '600 12px system-ui, sans-serif'
+      g.fillStyle = 'rgba(233,222,212,0.62)'
+      g.fillText('Esc  暂停 / 退出本局', w / 2, 26)
       g.font = '600 13px system-ui, sans-serif'
       g.fillStyle = 'rgba(233,222,212,0.7)'
-      g.fillText('消灭所有丧尸 · 第 ' + W.wave + ' / 6 波 · 目标：完成突围', w / 2, h - 18)
+      g.fillText('消灭所有丧尸 · 第 ' + W.wave + ' / 6 波 · 随机补给持续投放', w / 2, h - 18)
       const spread = (W.moving ? 7 : 2) + W.recoil * 9
       const cx = w / 2
       const cy = h / 2
       const gap = 9 + spread
       const len = 7
-      g.strokeStyle = 'rgba(240,230,220,0.92)'
+      g.strokeStyle = 'rgba(232,244,239,0.94)'
       g.lineWidth = 2
       g.beginPath()
       g.moveTo(cx - gap - len, cy); g.lineTo(cx - gap, cy)
@@ -1182,7 +1519,7 @@
       g.moveTo(cx, cy - gap - len); g.lineTo(cx, cy - gap)
       g.moveTo(cx, cy + gap); g.lineTo(cx, cy + gap + len)
       g.stroke()
-      g.fillStyle = 'rgba(240,230,220,0.92)'
+      g.fillStyle = 'rgba(126,224,197,0.95)'
       g.fillRect(cx - 1, cy - 1, 2, 2)
       if (W.hitT > 0) {
         g.strokeStyle = 'rgba(255,80,50,0.95)'
@@ -1256,7 +1593,7 @@
       const cy = h / 2
       const vg = g.createRadialGradient(cx, cy, h * 0.52, cx, cy, h * 0.98)
       vg.addColorStop(0, 'rgba(0,0,0,0)')
-      vg.addColorStop(1, 'rgba(0,0,0,0.45)')
+      vg.addColorStop(1, 'rgba(0,0,0,0.3)')
       g.fillStyle = vg
       g.fillRect(0, 0, w, h)
       const hp = Math.max(0, W.hp)
@@ -1291,9 +1628,9 @@
       const skyTop = Math.max(0, Math.min(horizon, h))
       if (skyTop > 0) {
         const sky = g.createLinearGradient(0, 0, 0, skyTop)
-        sky.addColorStop(0, '#0b0810')
-        sky.addColorStop(0.55, '#2b0f1a')
-        sky.addColorStop(1, '#8a3a1c')
+        sky.addColorStop(0, '#15111d')
+        sky.addColorStop(0.55, '#47202c')
+        sky.addColorStop(1, '#aa5029')
         g.fillStyle = sky
         g.fillRect(0, 0, w, skyTop)
       }
@@ -1308,15 +1645,15 @@
       g.arc(moonX, moonY, h * 0.045, 0, TAU)
       g.fill()
       if (horizon > -h * 0.2 && horizon < h) {
-        g.fillStyle = 'rgba(255,110,50,0.14)'
+        g.fillStyle = 'rgba(255,142,70,0.22)'
         g.fillRect(0, horizon - h * 0.015, w, h * 0.03)
       }
       if (horizon < h) {
         const gy = Math.max(0, horizon)
         const grd = g.createLinearGradient(0, gy, 0, h)
-        grd.addColorStop(0, '#4a3327')
-        grd.addColorStop(0.35, '#2b1f18')
-        grd.addColorStop(1, '#120d0b')
+        grd.addColorStop(0, '#6b4b3a')
+        grd.addColorStop(0.35, '#433127')
+        grd.addColorStop(1, '#201814')
         g.fillStyle = grd
         g.fillRect(0, gy, w, h - gy)
         drawGrid(g)
@@ -1328,6 +1665,7 @@
       drawAsh(g)
       if (W.phase === 'playing') {
         drawGun(g)
+        drawWeaponFx(g)
         drawHud(g)
         if (!W.locked && !W.dead) {
           g.font = '600 14px system-ui, sans-serif'
@@ -1361,7 +1699,16 @@
     function onKeyDown(e) {
       if (e.code === 'Tab' || e.code === 'Space') e.preventDefault()
       W.keys[e.code] = true
+      if (e.code === 'Escape' && W.phase === 'playing' && !W.dead) {
+        e.preventDefault()
+        W.firing = false
+        W.phase = 'paused'
+        hooks.onPhase('paused')
+        exitLock()
+        return
+      }
       if (e.code === 'KeyR' && W.phase === 'playing' && !W.dead) beginReload()
+      if (e.code === 'KeyM' && !e.repeat) toggleAudio()
     }
     function onKeyUp(e) {
       W.keys[e.code] = false
@@ -1489,8 +1836,10 @@
   // ============================ 启动 ============================
   const engine = createEngine(canvas, { onPhase: setPhaseUI })
   engine.mount()
+  updateAudioUI()
 
   document.getElementById('btn-start').addEventListener('click', () => engine.start())
+  document.getElementById('btn-sound').addEventListener('click', () => toggleAudio())
   document.getElementById('btn-resume').addEventListener('click', () => engine.resume())
   document.getElementById('btn-restart-paused').addEventListener('click', () => engine.start())
   document.getElementById('btn-menu-paused').addEventListener('click', () => engine.toMenu())
