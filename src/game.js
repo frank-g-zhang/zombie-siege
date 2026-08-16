@@ -315,10 +315,30 @@
 
     let loopTimer = null
     let lastT = Date.now()
-    const weaponImage = new Image()
-    let weaponImageReady = false
-    weaponImage.onload = () => { weaponImageReady = true }
-    weaponImage.src = 'assets/m4a1-first-person.png'
+
+    // ---------- 武器视图模型素材（真实抠图，透明 PNG） ----------
+    // crop: 裁剪框 [sx, sy, sw, sh]（去除透明边，便于精确锚定）；flip: 水平翻转（统一枪口/刀尖朝左上）
+    const weaponImages = {}
+    function loadWeaponImage(key, src, crop, flip) {
+      const img = new Image()
+      const st = { img, ready: false, crop: crop || null, flip: !!flip }
+      img.onload = () => { st.ready = true }
+      img.src = src
+      weaponImages[key] = st
+    }
+    loadWeaponImage('rifle', 'assets/m4a1-first-person.png', [575, 377, 1097, 564], false)
+    loadWeaponImage('dagger', 'assets/dagger-first-person.png', [21, 25, 542, 92], true)
+    loadWeaponImage('shotgun', 'assets/shotgun-first-person.png', [0, 0, 706, 308], true)
+    loadWeaponImage('grenade', 'assets/grenade-first-person.png', [491, 38, 315, 622], false)
+    loadWeaponImage('rocket', 'assets/rocket-first-person.png', [3, 10, 914, 211], true)
+
+    // 计算武器图裁剪后的源尺寸
+    function weaponSrcSize(key) {
+      const st = weaponImages[key]
+      if (!st || !st.ready) return null
+      const c = st.crop || [0, 0, st.img.naturalWidth, st.img.naturalHeight]
+      return { img: st.img, sx: c[0], sy: c[1], sw: c[2], sh: c[3], flip: st.flip }
+    }
 
     // ---------- 武器状态辅助 ----------
     function curDef() { return WEAPONS[W.curWeapon] }
@@ -391,7 +411,7 @@
       }
     }
 
-    function waveCount(n) { return 5 + n * 2 }
+    function waveCount(n) { return 7 + n * 3 }
 
     function spawnZombie(dist) {
       const ang = rand(0, TAU)
@@ -400,12 +420,12 @@
       const wv = Math.max(W.wave, 1)
       let type = 'normal'
       const r = Math.random()
-      if (wv >= 4 && r < 0.12) type = 'brute'
-      else if (wv >= 2 && r < 0.38) type = 'runner'
+      if (wv >= 3 && r < 0.15) type = 'brute'
+      else if (wv >= 2 && r < 0.44) type = 'runner'
       const cfg = {
-        normal: { hp: 44, speed: 1.25 + Math.min(wv * 0.08, 1.1) + rand(0, 0.35), dmg: 9, atk: 1.0, h: 1.72, bw: 0.92 },
-        runner: { hp: 30, speed: 2.6 + rand(0, 0.4), dmg: 6, atk: 0.75, h: 1.6, bw: 0.78 },
-        brute: { hp: 130, speed: 0.72 + rand(0, 0.15), dmg: 20, atk: 1.45, h: 2.15, bw: 1.35 },
+        normal: { hp: 40 + wv * 5, speed: 1.35 + Math.min(wv * 0.1, 1.3) + rand(0, 0.4), dmg: 9, atk: 1.0, h: 1.72, bw: 0.92 },
+        runner: { hp: 28 + wv * 4, speed: 2.6 + rand(0, 0.4) + Math.min(wv * 0.05, 0.5), dmg: 6, atk: 0.75, h: 1.6, bw: 0.78 },
+        brute: { hp: 130 + wv * 15, speed: 0.72 + rand(0, 0.15) + Math.min(wv * 0.03, 0.25), dmg: 20, atk: 1.45, h: 2.15, bw: 1.35 },
       }
       const c = cfg[type]
       W.zombies.push({
@@ -1108,8 +1128,8 @@
       if (emergency) W.supplyCd = Math.min(W.supplyCd, 2)
       W.supplyCd -= dt
       if (W.supplyCd <= 0) {
-        if (emergency || W.pickups.length < 3) spawnSupply(emergency ? (!hasRanged ? 'rifle' : 'ammo') : null)
-        W.supplyCd = rand(9, 16)
+        if (emergency || W.pickups.length < 4) spawnSupply(emergency ? (!hasRanged ? 'rifle' : 'ammo') : null)
+        W.supplyCd = rand(8, 13)
       }
       if (audio) {
         let near = false
@@ -1184,9 +1204,9 @@
       if (W.spawnQueue > 0) {
         W.spawnCd -= dt
         if (W.spawnCd <= 0) {
-          W.spawnCd = rand(0.55, 1.15)
+          W.spawnCd = rand(0.35, 0.8)
           W.spawnQueue--
-          spawnZombie(rand(34, 40))
+          spawnZombie(rand(30, 38))
         }
       }
       // 波次
@@ -1198,7 +1218,7 @@
           return
         }
         W.wave++
-        W.hp = Math.min(100, W.hp + 25)
+        W.hp = Math.min(100, W.hp + 35)
         const rstat = W.weapons.rifle
         const sstat = W.weapons.shotgun
         rstat.reserve = Math.min(WEAPONS.rifle.reserveMax, rstat.reserve + 30)
@@ -2024,7 +2044,73 @@
       g.restore()
     }
 
+    // 通用武器图片绘制：裁剪 + 翻转 + 摇晃/切枪/换弹/后坐姿态；返回 {x,y,dw,dh} 供枪口定位
+    function drawWeaponSprite(g, key, opts) {
+      const info = weaponSrcSize(key)
+      if (!info) return null
+      const o = opts || {}
+      const w = W.cw
+      const h = W.ch
+      const u = h / 720
+      const bob = vmBob(W.time, u)
+      const dip = vmDip(u)
+      let dw = info.sw * Math.min(w / info.sw, h / info.sh) * (o.k != null ? o.k : 0.82)
+      dw = Math.min(dw, w * (o.maxW || 0.85))
+      const dh = dw * info.sh / info.sw
+      const recoil = W.recoil * (o.kick != null ? o.kick : 8) * u
+      const reloadArc = W.reloading && o.reload ? Math.sin(clamp(W.reloadT / o.reload, 0, 1) * Math.PI) : 0
+      const x = w - dw + bob.x + (o.ox || 0) * u
+      const y = h - dh + bob.y + dip + recoil + reloadArc * h * 0.06 + (o.oy || 0) * u
+      const pivotX = w - 26
+      const pivotY = h + 18
+      g.save()
+      g.translate(pivotX, pivotY)
+      g.rotate((o.rot || 0) + W.recoil * (o.rotKick || 0) + reloadArc * 0.07)
+      g.translate(-pivotX, -pivotY)
+      if (info.flip) {
+        g.translate(x + dw / 2, y + dh / 2)
+        g.scale(-1, 1)
+        g.translate(-(x + dw / 2), -(y + dh / 2))
+      }
+      g.drawImage(info.img, info.sx, info.sy, info.sw, info.sh, x, y, dw, dh)
+      g.restore()
+      return { x, y, dw, dh }
+    }
+
     function drawDaggerVM(g) {
+      const swinging = W.meleeT > 0
+      const swingP = swinging ? 1 - W.meleeT / 0.3 : 0
+      const ang = swinging ? -1.15 + Math.pow(swingP, 0.65) * 1.9 : -0.35 + Math.sin(W.time * 1.7) * 0.05
+      const u = W.ch / 560
+      // 持刀手臂（画在刀身之下）
+      g.save()
+      g.strokeStyle = '#2a2622'
+      g.lineWidth = 46 * u
+      g.lineCap = 'round'
+      g.beginPath()
+      g.moveTo(W.cw * 0.92, W.ch * 1.0)
+      g.lineTo(W.cw * 0.8, W.ch * 0.92)
+      g.stroke()
+      g.restore()
+      const sp = drawWeaponSprite(g, 'dagger', { k: 1.4, maxW: 0.44, rot: ang, rotKick: 0.05, kick: 6, ox: -20, oy: 26 })
+      if (!sp) return drawDaggerVector(g)
+      // 挥砍轨迹
+      if (swinging && swingP > 0.1) {
+        const cx0 = sp.x + sp.dw
+        const cy0 = sp.y + sp.dh
+        g.save()
+        g.globalAlpha = 0.3 * (W.meleeT / 0.3)
+        g.strokeStyle = '#eef4f8'
+        g.lineWidth = 10 * u
+        g.lineCap = 'round'
+        g.beginPath()
+        g.arc(cx0, cy0, sp.dw * 0.85, -1.15 + Math.pow(Math.max(swingP - 0.3, 0), 0.65) * 1.9, ang)
+        g.stroke()
+        g.restore()
+      }
+    }
+
+    function drawDaggerVector(g) {
       const w = W.cw
       const h = W.ch
       const u = h / 560
@@ -2088,87 +2174,55 @@
     }
 
     function drawRifleVM(g) {
+      const u = W.ch / 720
+      const sp = drawWeaponSprite(g, 'rifle', { k: 0.82, maxW: 0.85, rotKick: 0.012, kick: 9, reload: WEAPONS.rifle.reload })
+      if (!sp) return drawRifleVector(g)
+      // 裁剪框内枪口/抛壳口的相对位置（由原构图换算）
+      W.gunMuzzleX = sp.x + sp.dw * 0.33
+      W.gunMuzzleY = sp.y + sp.dh * 0.18
+      W.gunEjectX = sp.x + sp.dw * 0.57
+      W.gunEjectY = sp.y + sp.dh * 0.4
+      if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u, W.flashT / 0.055, u)
+    }
+
+    function drawRifleVector(g) {
       const w = W.cw
       const h = W.ch
       const u = h / 720
       const t = W.time
-      const def = WEAPONS.rifle
-      if (!weaponImageReady) {
-        // 图片未就绪时的简笔后备视图
-        const bob = vmBob(t, u)
-        const dip = vmDip(u)
-        g.save()
-        g.translate(w * 0.8 + bob.x, h * 0.9 + bob.y + dip + W.recoil * 12 * u)
-        g.rotate(-0.18 + W.recoil * 0.03)
-        g.fillStyle = '#26282e'
-        g.fillRect(-40 * u, -30 * u, 320 * u, 34 * u)
-        g.fillStyle = '#2f3238'
-        g.fillRect(60 * u, -46 * u, 120 * u, 18 * u)
-        g.fillStyle = '#2a2018'
-        g.fillRect(-10 * u, 4 * u, 40 * u, 70 * u)
-        g.restore()
-        W.gunMuzzleX = w * 0.66
-        W.gunMuzzleY = h * 0.64
-        W.gunEjectX = w * 0.74
-        W.gunEjectY = h * 0.68
-        if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u, W.flashT / 0.055, u)
-        return
-      }
-      const scale = Math.min(w / weaponImage.naturalWidth, h / weaponImage.naturalHeight) * 0.82
-      const dw = weaponImage.naturalWidth * scale
-      const dh = weaponImage.naturalHeight * scale
-      const bobX = W.moving ? Math.cos(t * 5.5) * 6 * u : Math.sin(t * 1.5) * 1.5 * u
-      const bobY = W.moving ? Math.sin(t * 11) * 5 * u : Math.sin(t * 2.1) * 1.4 * u
-      const reloadP = W.reloading ? clamp(W.reloadT / def.reload, 0, 1) : 0
-      const reloadArc = Math.sin(reloadP * Math.PI)
-      const x = w - dw + bobX + W.recoil * 5 * u
-      const y = h - dh + bobY + W.recoil * 9 * u + reloadArc * h * 0.065 + vmDip(u)
-      const pivotX = w - 26
-      const pivotY = h + 18
-      const muzzleX = x + dw * 0.558
-      const muzzleY = y + dh * 0.51
-      W.gunMuzzleX = muzzleX
-      W.gunMuzzleY = muzzleY
-      W.gunEjectX = x + dw * 0.72
-      W.gunEjectY = y + dh * 0.64
-
+      const bob = vmBob(t, u)
+      const dip = vmDip(u)
       g.save()
-      g.translate(pivotX, pivotY)
-      g.rotate(W.recoil * 0.012 + reloadArc * 0.07)
-      g.translate(-pivotX, -pivotY)
-      g.drawImage(weaponImage, x, y, dw, dh)
-
-      if (W.flashT > 0) {
-        const fs = W.flashT / 0.055
-        g.save()
-        g.globalCompositeOperation = 'lighter'
-        const glow = g.createRadialGradient(muzzleX, muzzleY, 2, muzzleX, muzzleY, 38 * u)
-        glow.addColorStop(0, 'rgba(255,250,207,' + fs.toFixed(3) + ')')
-        glow.addColorStop(0.32, 'rgba(255,157,48,' + (fs * 0.78).toFixed(3) + ')')
-        glow.addColorStop(1, 'rgba(255,63,10,0)')
-        g.fillStyle = glow
-        g.beginPath()
-        g.arc(muzzleX, muzzleY, 38 * u, 0, TAU)
-        g.fill()
-
-        const aimAngle = Math.atan2(h * 0.5 - muzzleY, w * 0.5 - muzzleX)
-        g.translate(muzzleX, muzzleY)
-        g.rotate(aimAngle)
-        g.fillStyle = 'rgba(255,241,154,' + fs.toFixed(3) + ')'
-        g.beginPath()
-        g.moveTo(0, 0)
-        g.lineTo(70 * u, -15 * u)
-        g.lineTo(43 * u, 0)
-        g.lineTo(74 * u, 14 * u)
-        g.lineTo(31 * u, 8 * u)
-        g.closePath()
-        g.fill()
-        g.restore()
-      }
+      g.translate(w * 0.8 + bob.x, h * 0.9 + bob.y + dip + W.recoil * 12 * u)
+      g.rotate(-0.18 + W.recoil * 0.03)
+      g.fillStyle = '#26282e'
+      g.fillRect(-40 * u, -30 * u, 320 * u, 34 * u)
+      g.fillStyle = '#2f3238'
+      g.fillRect(60 * u, -46 * u, 120 * u, 18 * u)
+      g.fillStyle = '#2a2018'
+      g.fillRect(-10 * u, 4 * u, 40 * u, 70 * u)
       g.restore()
+      W.gunMuzzleX = w * 0.66
+      W.gunMuzzleY = h * 0.64
+      W.gunEjectX = w * 0.74
+      W.gunEjectY = h * 0.68
+      if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u, W.flashT / 0.055, u)
     }
 
     function drawShotgunVM(g) {
+      const u = W.ch / 560
+      const pumpP = W.pumpT > 0 ? Math.sin(clamp((0.55 - W.pumpT) / 0.55, 0, 1) * Math.PI) : 0
+      const sp = drawWeaponSprite(g, 'shotgun', { k: 0.95, maxW: 0.72, rot: -0.14 - pumpP * 0.06, rotKick: 0.045, kick: 20, ox: -6, oy: 8 + pumpP * 16, reload: WEAPONS.shotgun.reload })
+      if (!sp) return drawShotgunVector(g)
+      // 原图枪口在右端，翻转后位于左端
+      W.gunMuzzleX = sp.x + sp.dw * 0.05
+      W.gunMuzzleY = sp.y + sp.dh * 0.42
+      W.gunEjectX = sp.x + sp.dw * 0.62
+      W.gunEjectY = sp.y + sp.dh * 0.5
+      if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u * 1.5, W.flashT / 0.07, u)
+    }
+
+    function drawShotgunVector(g) {
       const w = W.cw
       const h = W.ch
       const u = h / 560
@@ -2213,6 +2267,37 @@
     }
 
     function drawGrenadeVM(g) {
+      const u = W.ch / 560
+      const st = W.weapons.grenade
+      let thrust = 0
+      if (W.throwT > 0) {
+        const p = 1 - W.throwT / 0.35
+        thrust = Math.sin(p * Math.PI) * (p < 0.5 ? -1 : 1.6)
+      }
+      if (!(st.count > 0 || W.throwT <= 0)) return
+      if (!weaponSrcSize('grenade')) return drawGrenadeVector(g)
+      // 持雷手臂（画在雷体之下）
+      g.save()
+      g.strokeStyle = '#2a2622'
+      g.lineWidth = 42 * u
+      g.lineCap = 'round'
+      g.beginPath()
+      g.moveTo(W.cw * 0.94, W.ch * 1.02)
+      g.lineTo(W.cw * 0.82, W.ch * 0.9)
+      g.stroke()
+      g.restore()
+      const sp = drawWeaponSprite(g, 'grenade', { k: 0.42, maxW: 0.3, rot: -0.3 + thrust * 0.3, kick: 4, ox: 150 - thrust * 70, oy: -6 + Math.abs(thrust) * 14 })
+      if (!sp) return
+      // 握持的手
+      g.save()
+      g.fillStyle = '#23201d'
+      g.beginPath()
+      g.arc(sp.x + sp.dw * 0.5, sp.y + sp.dh * 0.86, 16 * u, 0, TAU)
+      g.fill()
+      g.restore()
+    }
+
+    function drawGrenadeVector(g) {
       const w = W.cw
       const h = W.ch
       const u = h / 560
@@ -2279,6 +2364,19 @@
     }
 
     function drawRocketVM(g) {
+      const u = W.ch / 560
+      const kick = W.throwT > 0 ? Math.sin(clamp((0.4 - W.throwT) / 0.4, 0, 1) * Math.PI) : 0
+      const sp = drawWeaponSprite(g, 'rocket', { k: 0.95, maxW: 0.8, rot: -0.1 - kick * 0.06, rotKick: 0.05, kick: 24 + kick * 20, ox: -4, oy: 16 })
+      if (!sp) return drawRocketVector(g)
+      // 原图弹头朝右，翻转后位于左端（发射口）
+      W.gunMuzzleX = sp.x + sp.dw * 0.04
+      W.gunMuzzleY = sp.y + sp.dh * 0.5
+      W.gunEjectX = sp.x + sp.dw * 0.5
+      W.gunEjectY = sp.y + sp.dh * 0.72
+      if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u * 2.2, W.flashT / 0.09, u)
+    }
+
+    function drawRocketVector(g) {
       const w = W.cw
       const h = W.ch
       const u = h / 560
