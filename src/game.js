@@ -315,10 +315,24 @@
 
     let loopTimer = null
     let lastT = Date.now()
-    const weaponImage = new Image()
-    let weaponImageReady = false
-    weaponImage.onload = () => { weaponImageReady = true }
-    weaponImage.src = 'assets/m4a1-first-person.png'
+    const weaponImages = {}
+
+    function loadWeaponImage(id, src) {
+      const state = { image: null, ready: false }
+      const source = new Image()
+      source.onload = () => {
+        state.image = source
+        state.ready = true
+      }
+      source.src = src
+      weaponImages[id] = state
+    }
+
+    loadWeaponImage('rifle', 'assets/m4a1-first-person.png')
+    loadWeaponImage('dagger', 'assets/dagger-first-person.png')
+    loadWeaponImage('shotgun', 'assets/shotgun-first-person.png')
+    loadWeaponImage('grenade', 'assets/grenade-first-person.png')
+    loadWeaponImage('rocket', 'assets/rocket-first-person.png')
 
     // ---------- 武器状态辅助 ----------
     function curDef() { return WEAPONS[W.curWeapon] }
@@ -2033,6 +2047,27 @@
       const dip = vmDip(u)
       const swinging = W.meleeT > 0
       const swingP = swinging ? 1 - W.meleeT / 0.3 : 0
+      const view = weaponImages.dagger
+      if (view && view.ready) {
+        const image = view.image
+        const iw = image.naturalWidth || image.width
+        const ih = image.naturalHeight || image.height
+        const scale = Math.min(w / iw, h / ih) * 0.82
+        const dw = iw * scale
+        const dh = ih * scale
+        const slash = swinging ? Math.sin(swingP * Math.PI) : 0
+        const x = w - dw + bob.x - slash * 76 * u
+        const y = h - dh + bob.y + dip - slash * 34 * u
+        const pivotX = w + 34
+        const pivotY = h + 28
+        g.save()
+        g.translate(pivotX, pivotY)
+        g.rotate(-slash * 0.32)
+        g.translate(-pivotX, -pivotY)
+        g.drawImage(image, x, y, dw, dh)
+        g.restore()
+        return
+      }
       const bx = w * 0.74 + bob.x
       const by = h * 0.86 + bob.y + dip
       g.save()
@@ -2093,7 +2128,8 @@
       const u = h / 720
       const t = W.time
       const def = WEAPONS.rifle
-      if (!weaponImageReady) {
+      const view = weaponImages.rifle
+      if (!view || !view.ready) {
         // 图片未就绪时的简笔后备视图
         const bob = vmBob(t, u)
         const dip = vmDip(u)
@@ -2114,9 +2150,10 @@
         if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u, W.flashT / 0.055, u)
         return
       }
-      const scale = Math.min(w / weaponImage.naturalWidth, h / weaponImage.naturalHeight) * 0.82
-      const dw = weaponImage.naturalWidth * scale
-      const dh = weaponImage.naturalHeight * scale
+      const image = view.image
+      const scale = Math.min(w / image.naturalWidth, h / image.naturalHeight) * 0.82
+      const dw = image.naturalWidth * scale
+      const dh = image.naturalHeight * scale
       const bobX = W.moving ? Math.cos(t * 5.5) * 6 * u : Math.sin(t * 1.5) * 1.5 * u
       const bobY = W.moving ? Math.sin(t * 11) * 5 * u : Math.sin(t * 2.1) * 1.4 * u
       const reloadP = W.reloading ? clamp(W.reloadT / def.reload, 0, 1) : 0
@@ -2136,7 +2173,7 @@
       g.translate(pivotX, pivotY)
       g.rotate(W.recoil * 0.012 + reloadArc * 0.07)
       g.translate(-pivotX, -pivotY)
-      g.drawImage(weaponImage, x, y, dw, dh)
+      g.drawImage(image, x, y, dw, dh)
 
       if (W.flashT > 0) {
         const fs = W.flashT / 0.055
@@ -2175,6 +2212,34 @@
       const t = W.time
       const bob = vmBob(t, u)
       const dip = vmDip(u)
+      const view = weaponImages.shotgun
+      if (view && view.ready) {
+        const image = view.image
+        const iw = image.naturalWidth || image.width
+        const ih = image.naturalHeight || image.height
+        const scale = Math.min(w / iw, h / ih) * 0.8
+        const dw = iw * scale
+        const dh = ih * scale
+        const pumpP = W.pumpT > 0 ? Math.sin(clamp((0.55 - W.pumpT) / 0.55, 0, 1) * Math.PI) : 0
+        const x = w - dw + bob.x + W.recoil * 6 * u - pumpP * 14 * u
+        const y = h - dh + bob.y + dip + W.recoil * 11 * u + pumpP * 4 * u
+        const pivotX = w - 20
+        const pivotY = h + 20
+        g.save()
+        g.translate(pivotX, pivotY)
+        g.rotate(W.recoil * 0.018 - pumpP * 0.012)
+        g.translate(-pivotX, -pivotY)
+        g.drawImage(image, x, y, dw, dh)
+        g.restore()
+        const muzzleX = x + dw * 0.52
+        const muzzleY = y + dh * 0.4
+        W.gunMuzzleX = muzzleX
+        W.gunMuzzleY = muzzleY
+        W.gunEjectX = x + dw * 0.7
+        W.gunEjectY = y + dh * 0.63
+        if (W.flashT > 0) drawMuzzleFlash(g, muzzleX, muzzleY, u * 1.5, W.flashT / 0.07, u)
+        return
+      }
       const baseX = w * 0.88 + bob.x
       const baseY = h * 0.94 + bob.y + dip + W.recoil * 18 * u
       const ang = -0.62 + W.recoil * 0.05
@@ -2225,6 +2290,26 @@
       if (W.throwT > 0) {
         const p = 1 - W.throwT / 0.35
         thrust = Math.sin(p * Math.PI) * (p < 0.5 ? -1 : 1.6)
+      }
+      const view = weaponImages.grenade
+      if (view && view.ready) {
+        const image = view.image
+        const iw = image.naturalWidth || image.width
+        const ih = image.naturalHeight || image.height
+        const scale = Math.min(w / iw, h / ih) * 0.9
+        const dw = iw * scale
+        const dh = ih * scale
+        const x = w - dw + bob.x - thrust * 70 * u
+        const y = h - dh + bob.y + dip + Math.abs(thrust) * 12 * u
+        const pivotX = w + 24
+        const pivotY = h + 24
+        g.save()
+        g.translate(pivotX, pivotY)
+        g.rotate(-thrust * 0.11)
+        g.translate(-pivotX, -pivotY)
+        g.drawImage(image, x, y, dw, dh)
+        g.restore()
+        return
       }
       const bx = w * 0.78 + bob.x - thrust * 70 * u
       const by = h * 0.84 + bob.y + dip + Math.abs(thrust) * 12 * u
@@ -2286,6 +2371,31 @@
       const bob = vmBob(t, u)
       const dip = vmDip(u)
       const kick = W.throwT > 0 ? Math.sin(clamp((0.4 - W.throwT) / 0.4, 0, 1) * Math.PI) : 0
+      const view = weaponImages.rocket
+      if (view && view.ready) {
+        const image = view.image
+        const iw = image.naturalWidth || image.width
+        const ih = image.naturalHeight || image.height
+        const scale = Math.min(w / iw, h / ih) * 0.78
+        const dw = iw * scale
+        const dh = ih * scale
+        const x = w - dw + bob.x + kick * 34 * u
+        const y = h - dh + bob.y + dip + kick * 24 * u
+        const pivotX = w - 18
+        const pivotY = h + 22
+        g.save()
+        g.translate(pivotX, pivotY)
+        g.rotate(kick * 0.018)
+        g.translate(-pivotX, -pivotY)
+        g.drawImage(image, x, y, dw, dh)
+        g.restore()
+        W.gunMuzzleX = x + dw * 0.545
+        W.gunMuzzleY = y + dh * 0.47
+        W.gunEjectX = x + dw * 0.72
+        W.gunEjectY = y + dh * 0.65
+        if (W.flashT > 0) drawMuzzleFlash(g, W.gunMuzzleX, W.gunMuzzleY, u * 2.2, W.flashT / 0.09, u)
+        return
+      }
       const bx = w * 0.82 + bob.x + kick * 36 * u
       const by = h * 0.9 + bob.y + dip + kick * 28 * u
       const ang = -0.56
