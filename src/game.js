@@ -8,6 +8,17 @@
 ;(function () {
   'use strict'
 
+  // ============================ 输入模式检测（一次性求值，不做动态切换） ============================
+  const isTouch = (() => {
+    try {
+      if (window.matchMedia && matchMedia('(pointer: coarse)').matches) return true
+      if (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && window.matchMedia && matchMedia('(hover: none)').matches) return true
+      return false
+    } catch (e) {
+      return false
+    }
+  })()
+
   // ============================ 样式 ============================
   const CSS = [
     'body{margin:0;background:#000}',
@@ -37,9 +48,39 @@
     '.zfps-btn:hover{transform:translateY(-1px)}',
     '.zfps-btn.sec{background:rgba(255,255,255,.09);box-shadow:none;border:1px solid rgba(255,255,255,.15)}',
     '.zfps-panel .zfps-note{font-size:11.5px;color:#7d736c;margin-top:10px}',
-  ].join('')
+    // 移动端防滚动 / 防缩放（页面本无可滚动内容，桌面无视觉影响）
+    'html,body{height:100%;overflow:hidden;overscroll-behavior:none}',
+    'body{position:fixed;inset:0}',
+    '.zfps-root,.zfps-canvas{touch-action:none;-webkit-tap-highlight-color:transparent}',
+    '.zfps-panel{max-height:92dvh}',
+    '.zfps-tc{display:none!important}',
+    '.is-touch .zfps-km{display:none!important}',
+    '.is-touch .zfps-tc{display:block!important}',
+    '.is-touch .zfps-controls-mini.zfps-tc{display:grid!important}',
+    '.is-touch .zfps-mini-btn{padding:10px 16px;font-size:14px}',
+    '.is-touch .zfps-canvas{cursor:none}',
+  ]
+  if (isTouch) {
+    CSS.push(
+      // 触屏控制层：介于 canvas 与 screens/topbar 之间
+      '.zfps-touch-ui{position:absolute;inset:0;z-index:3;touch-action:none;-webkit-touch-callout:none}',
+      '.zfps-look-zone{position:absolute;inset:0}',
+      '.zfps-stick-zone{position:absolute;left:0;bottom:0;width:46%;height:62%}',
+      '.zfps-stick-base{position:absolute;left:34px;bottom:calc(34px + env(safe-area-inset-bottom));width:128px;height:128px;border-radius:50%;border:2px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06)}',
+      '.zfps-stick-head{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.4)}',
+      '.zfps-tbtn{position:absolute;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.10);color:#e8d9c8;font-family:inherit;font-weight:700;touch-action:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}',
+      '.zfps-tbtn-fire{width:96px;height:96px;right:calc(30px + env(safe-area-inset-right));bottom:calc(96px + env(safe-area-inset-bottom));border-color:rgba(255,120,80,.55);background:rgba(255,90,50,.22)}',
+      '.zfps-tbtn-fire::after{content:"";position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid rgba(255,200,170,.9)}',
+      '.zfps-tbtn-reload{width:60px;height:60px;right:calc(142px + env(safe-area-inset-right));bottom:calc(52px + env(safe-area-inset-bottom));font-size:13px}',
+      '.zfps-tbtn-switch{width:60px;height:60px;right:calc(142px + env(safe-area-inset-right));bottom:calc(124px + env(safe-area-inset-bottom));font-size:13px;border-color:rgba(130,180,220,.5);background:rgba(60,110,170,.22)}',
+      '.zfps-tbtn-pause{width:40px;height:40px;top:calc(10px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right));font-size:15px;line-height:1}',
+      '.zfps-rotate-hint{position:absolute;top:calc(64px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:6;padding:8px 16px;border-radius:10px;background:rgba(10,6,8,.7);font-size:13px;color:#e8d9c8;pointer-events:none;white-space:nowrap;transition:opacity .4s}',
+      '@media (orientation: landscape){.zfps-rotate-hint{opacity:0}}',
+    )
+  }
+  const CSS_TEXT = CSS.join('')
   const styleEl = document.createElement('style')
-  styleEl.textContent = CSS
+  styleEl.textContent = CSS_TEXT
   document.head.appendChild(styleEl)
 
   // ============================ 音效（程序化合成） ============================
@@ -227,6 +268,9 @@
   const canvas = document.getElementById('game-canvas')
   const root = document.getElementById('game-root')
   const topbar = document.getElementById('topbar')
+  const touchUI = document.getElementById('touch-ui')
+  const rotateHint = document.getElementById('rotate-hint')
+  if (isTouch) root.classList.add('is-touch')
   const screens = {
     menu: document.getElementById('screen-menu'),
     paused: document.getElementById('screen-paused'),
@@ -261,6 +305,9 @@
       screens[key].classList.toggle('zfps-hidden', screenKey[phase] !== key)
     }
     topbar.classList.toggle('zfps-hidden', phase === 'playing')
+    touchUI.classList.toggle('zfps-hidden', !(isTouch && phase === 'playing'))
+    // 竖屏提示仅在触屏战斗阶段出现；横屏时由 CSS opacity 自动淡出
+    rotateHint.classList.toggle('zfps-hidden', !(isTouch && phase === 'playing'))
     if (stats && (phase === 'gameover' || phase === 'victory')) {
       renderStats(document.getElementById('stats-' + screenKey[phase]), stats)
     }
@@ -310,11 +357,24 @@
       dead: false, deathT: 0, time: 0, locked: false,
       bannerText: '', bannerT: 0, bannerMax: 0, emptyT: 0, growlCd: 3, footstepCd: 0,
       gunMuzzleX: 0, gunMuzzleY: 0, gunEjectX: 0, gunEjectY: 0,
-      cw: 0, ch: 0, _dt: 0, _focal: 0, _cx: 0, _cy: 0, _horizon: 0,
+      cw: 0, ch: 0, dpr: 1, _dt: 0, _focal: 0, _cx: 0, _cy: 0, _horizon: 0,
     }
 
-    let loopTimer = null
+    // 触屏摇杆输入（引擎内共享，update 读取；由外部触控层经 engine.input 写入）
+    const touchMove = { x: 0, y: 0 }
+
+    let rafId = 0
     let lastT = Date.now()
+    function tick() {
+      loop()
+      rafId = requestAnimationFrame(tick)
+    }
+    function stopLoop() {
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+    }
     const weaponImages = {}
 
     function loadWeaponImage(id, src) {
@@ -496,6 +556,11 @@
       W.floats.push({ text, x: x || W.cw / 2 + rand(-30, 30), y: y || W.ch * 0.4, color: color || '#ffd166', life: 1.2 })
     }
 
+    // 触屏竖屏时以短边计算焦距，避免水平视野过窄；桌面保持 h*0.95 不变
+    function focalPx() {
+      return (isTouch ? Math.min(W.cw, W.ch) : W.ch) * 0.95
+    }
+
     function project(x, z, hgt) {
       const dx = x - W.px
       const dz = z - W.pz
@@ -505,7 +570,7 @@
       const res = { dist, rel, depth, visible: depth > 0.25 && Math.abs(rel) < 1.62 }
       if (!res.visible) return res
       const h = W.ch
-      const focal = h * 0.95
+      const focal = focalPx()
       const shx = Math.sin(W.time * 61) * W.shake * 7
       const shy = Math.cos(W.time * 53) * W.shake * 5
       res.sx = W.cw / 2 + Math.tan(rel) * focal + shx
@@ -517,7 +582,7 @@
     function spawnBlood(hitH, depthX, rel, head) {
       const w = W.cw, h = W.ch
       if (!w || !h) return
-      const focal = h * 0.95
+      const focal = focalPx()
       const sx = w / 2 + Math.tan(rel) * focal
       const sy = h / 2 + Math.tan(W.pitch) * focal + (W.camH - hitH) * (focal / depthX)
       const n = head ? 14 : 9
@@ -1058,7 +1123,7 @@
     function update(dt) {
       W.time += dt
       W._dt = dt
-      W.locked = document.pointerLockElement === canvas
+      W.locked = isTouch ? W.phase === 'playing' : document.pointerLockElement === canvas
       W.shake = Math.max(0, W.shake - dt * 2.6)
       W.dmgFlash = Math.max(0, W.dmgFlash - dt)
       W.hitT = Math.max(0, W.hitT - dt)
@@ -1138,23 +1203,39 @@
           }
         }
       }
-      // 移动
+      // 移动（触屏：摇杆模拟量 + 推满疾跑；桌面：键盘，逻辑与原版一致）
       const k = W.keys
       let mx = 0
       let mz = 0
-      if (k.KeyW) mz += 1
-      if (k.KeyS) mz -= 1
-      if (k.KeyA) mx -= 1
-      if (k.KeyD) mx += 1
-      const sprint = k.ShiftLeft || k.ShiftRight
+      let sprint = false
+      let mag = 1
+      if (isTouch) {
+        mx = touchMove.x
+        mz = touchMove.y
+        mag = Math.hypot(mx, mz)
+        sprint = mag >= 0.9
+        if (mag > 1) {
+          mx /= mag
+          mz /= mag
+          mag = 1
+        }
+      } else {
+        if (k.KeyW) mz += 1
+        if (k.KeyS) mz -= 1
+        if (k.KeyA) mx -= 1
+        if (k.KeyD) mx += 1
+        sprint = k.ShiftLeft || k.ShiftRight
+      }
       W.moving = false
       if (mx !== 0 || mz !== 0) {
         W.moving = true
-        const len = Math.hypot(mx, mz)
-        mx /= len; mz /= len
+        if (!isTouch) {
+          const len = Math.hypot(mx, mz)
+          mx /= len; mz /= len
+        }
         const s = Math.sin(W.yaw)
         const c = Math.cos(W.yaw)
-        const speed = sprint ? 7.4 : 4.6
+        const speed = (sprint ? 7.4 : 4.6) * (isTouch ? mag : 1)
         W.px = clamp(W.px + (s * mz - c * mx) * speed * dt, -46, 46)
         W.pz = clamp(W.pz + (c * mz + s * mx) * speed * dt, -46, 46)
         W.footstepCd -= dt
@@ -2543,10 +2624,14 @@
       const hp = Math.max(0, W.hp)
       const def = curDef()
       const st = curSt()
+      // 触屏布局：血条/武器面板整体上抬，给摇杆与攻击键让位；右上信息左移避开暂停键
+      const ui = isTouch
+        ? { bx: 20, bw: 170, byOff: 175, axOff: 20, ayOff: 226, txOff: 74 }
+        : { bx: 24, bw: 210, byOff: 38, axOff: 26, ayOff: 38, txOff: 26 }
       // 左下：生命
-      const bx = 24
-      const by = h - 38
-      const bw = 210
+      const bx = ui.bx
+      const by = h - ui.byOff
+      const bw = ui.bw
       const bh = 14
       g.textAlign = 'left'
       g.font = '600 13px system-ui, sans-serif'
@@ -2563,8 +2648,8 @@
       g.lineWidth = 1
       g.strokeRect(bx, by, bw, bh)
       // 右下：武器面板
-      const ax = w - 26
-      const ay = h - 38
+      const ax = w - ui.axOff
+      const ay = h - ui.ayOff
       g.textAlign = 'right'
       g.fillStyle = 'rgba(8,10,12,0.38)'
       g.fillRect(ax - 250, ay - 82, 250, 112)
@@ -2623,21 +2708,26 @@
         g.globalAlpha = 1
       }
       // 右上：波次
+      const tx = w - ui.txOff
       g.font = '700 20px system-ui, sans-serif'
       g.fillStyle = '#ffb199'
-      g.fillText('第 ' + W.wave + ' 波', w - 26, 36)
+      g.fillText('第 ' + W.wave + ' 波', tx, 36)
       g.font = '600 14px system-ui, sans-serif'
       g.fillStyle = '#c9bfb8'
-      g.fillText('击杀 ' + W.kills + ' · 得分 ' + W.score, w - 26, 58)
+      g.fillText('击杀 ' + W.kills + ' · 得分 ' + W.score, tx, 58)
       const remaining = W.spawnQueue + W.zombies.filter((z) => !z.dead).length
-      g.fillText('剩余丧尸 ' + remaining, w - 26, 78)
+      g.fillText('剩余丧尸 ' + remaining, tx, 78)
       // 提示
       g.font = '600 12px system-ui, sans-serif'
       g.fillStyle = 'rgba(233,222,212,0.62)'
-      g.fillText('Esc 暂停 / 退出本局', w / 2, 26)
+      g.fillText(isTouch ? '右上 Ⅱ 暂停 / 退出本局' : 'Esc 暂停 / 退出本局', w / 2, 26)
       g.font = '600 13px system-ui, sans-serif'
       g.fillStyle = 'rgba(233,222,212,0.7)'
-      g.fillText('左键 攻击 · 右键 / 滚轮 切换武器 · 1-5 直选 · R 换弹 · M 声音', w / 2, h - 18)
+      g.fillText(
+        isTouch ? '左摇杆 移动 · 右侧滑动 瞄准 · 攻击键 攻击 · 切枪键 换武器'
+                : '左键 攻击 · 右键 / 滚轮 切换武器 · 1-5 直选 · R 换弹 · M 声音',
+        w / 2, h - 18
+      )
       // 准星
       const spread = (W.moving ? 7 : 2) + W.recoil * 9
       const cx = w / 2
@@ -2763,7 +2853,9 @@
       const h = W.ch
       const g = canvas.getContext('2d')
       if (!g || w < 2 || h < 2) return
-      const focal = h * 0.95
+      // 背板为 CSS 像素 × DPR，统一缩放回 CSS 像素坐标系（绘制代码无需感知 DPR）
+      g.setTransform(W.dpr || 1, 0, 0, W.dpr || 1, 0, 0)
+      const focal = focalPx()
       const cx = w / 2 + Math.sin(W.time * 61) * W.shake * 7
       const cy = h / 2 + Math.cos(W.time * 53) * W.shake * 5
       const horizon = cy + Math.tan(W.pitch) * focal
@@ -2836,10 +2928,13 @@
     }
 
     // ---------- 输入 ----------
+    const MOUSE_SENS = 0.0022
+    const LOOK_SENS = 0.0032 // 触屏瞄准灵敏度（独立于鼠标）
     function onMouseMove(e) {
+      if (isTouch) return
       if (W.phase === 'playing' && W.locked) {
-        W.yaw = normAngle(W.yaw - e.movementX * 0.0022)
-        W.pitch = clamp(W.pitch - e.movementY * 0.0022, -1.05, 1.05)
+        W.yaw = normAngle(W.yaw - e.movementX * MOUSE_SENS)
+        W.pitch = clamp(W.pitch - e.movementY * MOUSE_SENS, -1.05, 1.05)
       }
     }
     function onKeyDown(e) {
@@ -2865,6 +2960,7 @@
       W.keys[e.code] = false
     }
     function onMouseDown(e) {
+      if (isTouch) return
       if (e.button === 2) {
         if (W.phase === 'playing' && !W.dead) cycleWeapon(1)
         return
@@ -2880,6 +2976,7 @@
       W.fireCd = Math.min(W.fireCd, 0.03)
     }
     function onMouseUp(e) {
+      if (isTouch) return
       if (e.button === 0) W.firing = false
     }
     function onContextMenu(e) {
@@ -2903,6 +3000,7 @@
     }
     function onLockError() {}
     function requestLock() {
+      if (isTouch) return
       try {
         canvas.focus()
         const p = canvas.requestPointerLock ? canvas.requestPointerLock() : null
@@ -2924,20 +3022,22 @@
         if (dt <= 0) dt = 0.001
         const w = canvas.clientWidth || 1
         const h = canvas.clientHeight || 1
-        if (w !== W.cw || h !== W.ch || canvas.width !== w || canvas.height !== h) {
+        // 背板分辨率 = CSS 像素 × DPR（上限 2 保帧率）；W.cw/ch 仍为 CSS 像素
+        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        const bw = Math.round(w * dpr)
+        const bh = Math.round(h * dpr)
+        if (w !== W.cw || h !== W.ch || canvas.width !== bw || canvas.height !== bh || W.dpr !== dpr) {
           W.cw = w
           W.ch = h
-          canvas.width = w
-          canvas.height = h
+          canvas.width = bw
+          canvas.height = bh
         }
+        W.dpr = dpr
         update(dt)
         draw()
       } catch (err) {
         console.error('zfps engine error', err)
-        if (loopTimer) {
-          clearInterval(loopTimer)
-          loopTimer = null
-        }
+        stopLoop()
       }
     }
 
@@ -2958,13 +3058,10 @@
         W.phase = 'menu'
         hooks.onPhase('menu')
         try { canvas.focus() } catch (e) {}
-        loopTimer = setInterval(loop, 16)
+        rafId = requestAnimationFrame(tick)
       },
       dispose() {
-        if (loopTimer) {
-          clearInterval(loopTimer)
-          loopTimer = null
-        }
+        stopLoop()
         canvas.removeEventListener('mousemove', onMouseMove)
         canvas.removeEventListener('keydown', onKeyDown)
         canvas.removeEventListener('keyup', onKeyUp)
@@ -2995,12 +3092,194 @@
         W.phase = 'menu'
         hooks.onPhase('menu')
       },
+      pause() {
+        if (W.phase !== 'playing' || W.dead) return
+        W.firing = false
+        W.phase = 'paused'
+        hooks.onPhase('paused')
+        exitLock()
+      },
+      input: {
+        setMove(x, y) {
+          touchMove.x = clamp(x, -1, 1)
+          touchMove.y = clamp(y, -1, 1)
+        },
+        setFiring(on) {
+          W.firing = !!on
+        },
+        look(dx, dy) {
+          if (W.phase !== 'playing' || W.dead) return
+          W.yaw = normAngle(W.yaw - dx * LOOK_SENS)
+          W.pitch = clamp(W.pitch - dy * LOOK_SENS, -1.05, 1.05)
+        },
+        reload() {
+          if (W.phase === 'playing' && !W.dead) beginReload()
+        },
+        cycleWeapon() {
+          if (W.phase === 'playing' && !W.dead) cycleWeapon(1)
+        },
+      },
     }
+  }
+
+  // ============================ 触屏控制 ============================
+  // 独立于引擎：只通过 engine.input / engine.pause 与引擎通信，引擎不感知触控层。
+  // iOS 的 touch 事件持续派发到手指落下的起始元素，多指并发天然隔离，用 identifier 区分各手指。
+  function initTouchControls(engine) {
+    const stickZone = document.getElementById('stick-zone')
+    const stickBase = document.getElementById('stick-base')
+    const stickHead = document.getElementById('stick-head')
+    const lookZone = document.getElementById('look-zone')
+
+    const STICK_R = 56 // 摇杆头最大位移（CSS 像素）
+    const DEAD = 0.14 // 摇杆死区（归一化幅值）
+    const clampN = (v, a, b) => (v < a ? a : v > b ? b : v)
+
+    let moveId = null // 摇杆手指 identifier
+    let anchorX = 0
+    let anchorY = 0
+
+    function resetStick() {
+      moveId = null
+      engine.input.setMove(0, 0)
+      stickHead.style.transform = ''
+      stickBase.style.left = ''
+      stickBase.style.top = ''
+      stickBase.style.bottom = ''
+    }
+
+    // ---- 浮动摇杆（底座跟手出现，松手回默认位） ----
+    stickZone.addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      if (moveId !== null) return
+      const t = e.changedTouches[0]
+      if (!t) return
+      moveId = t.identifier
+      const rect = root.getBoundingClientRect()
+      anchorX = clampN(t.clientX, 70, rect.width - 70)
+      anchorY = clampN(t.clientY, 70, rect.height - 70)
+      stickBase.style.left = anchorX - 64 + 'px'
+      stickBase.style.top = anchorY - 64 + 'px'
+      stickBase.style.bottom = 'auto'
+    }, { passive: false })
+
+    stickZone.addEventListener('touchmove', (e) => {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        if (t.identifier !== moveId) continue
+        let dx = t.clientX - anchorX
+        let dy = t.clientY - anchorY
+        const d = Math.hypot(dx, dy)
+        const cl = Math.min(d, STICK_R)
+        if (d > 0.001) {
+          dx = (dx / d) * cl
+          dy = (dy / d) * cl
+        } else {
+          dx = 0
+          dy = 0
+        }
+        stickHead.style.transform = 'translate(' + dx + 'px,' + dy + 'px)'
+        const m = cl / STICK_R
+        if (m < DEAD) {
+          engine.input.setMove(0, 0)
+        } else {
+          const mag = (m - DEAD) / (1 - DEAD)
+          engine.input.setMove((dx / cl) * mag, (-dy / cl) * mag) // 屏幕 y 向下为正，前推取反
+        }
+      }
+    }, { passive: false })
+
+    function onStickEnd(e) {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        if (t.identifier !== moveId) continue
+        resetStick()
+      }
+    }
+    stickZone.addEventListener('touchend', onStickEnd, { passive: false })
+    stickZone.addEventListener('touchcancel', onStickEnd, { passive: false })
+
+    // ---- 全屏瞄准区（滑动增量 → 视角） ----
+    let lookId = null
+    let lookX = 0
+    let lookY = 0
+
+    lookZone.addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      if (lookId !== null) return
+      const t = e.changedTouches[0]
+      if (!t) return
+      lookId = t.identifier
+      lookX = t.clientX
+      lookY = t.clientY
+    }, { passive: false })
+
+    lookZone.addEventListener('touchmove', (e) => {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        if (t.identifier !== lookId) continue
+        engine.input.look(t.clientX - lookX, t.clientY - lookY)
+        lookX = t.clientX
+        lookY = t.clientY
+      }
+    }, { passive: false })
+
+    function onLookEnd(e) {
+      e.preventDefault()
+      for (const t of e.changedTouches) {
+        if (t.identifier !== lookId) continue
+        lookId = null
+      }
+    }
+    lookZone.addEventListener('touchend', onLookEnd, { passive: false })
+    lookZone.addEventListener('touchcancel', onLookEnd, { passive: false })
+
+    // ---- 攻击 / 换弹 / 切枪 / 暂停按钮 ----
+    const btnFire = document.getElementById('btn-fire')
+    btnFire.addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      engine.input.setFiring(true)
+    }, { passive: false })
+    const stopFire = (e) => {
+      e.preventDefault()
+      engine.input.setFiring(false)
+    }
+    btnFire.addEventListener('touchend', stopFire, { passive: false })
+    btnFire.addEventListener('touchcancel', stopFire, { passive: false })
+
+    document.getElementById('btn-reload').addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      engine.input.reload()
+    }, { passive: false })
+
+    document.getElementById('btn-switch').addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      engine.input.cycleWeapon()
+    }, { passive: false })
+
+    document.getElementById('btn-pause').addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      engine.pause()
+    }, { passive: false })
+
+    // ---- 切后台自动暂停 + 复位触控状态（防"卡键"） ----
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return
+      if (moveId !== null) resetStick()
+      lookId = null
+      engine.input.setFiring(false)
+      engine.pause()
+    })
+
+    // Safari 私有捏合事件，双保险阻止页面缩放
+    document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false })
+    document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false })
   }
 
   // ============================ 启动 ============================
   const engine = createEngine(canvas, { onPhase: setPhaseUI })
   engine.mount()
+  if (isTouch) initTouchControls(engine)
   updateAudioUI()
 
   document.getElementById('btn-start').addEventListener('click', () => engine.start())
@@ -3015,11 +3294,19 @@
   document.getElementById('btn-close').addEventListener('click', () => engine.toMenu())
   document.getElementById('btn-fullscreen').addEventListener('click', () => {
     try {
-      if (document.fullscreenElement) document.exitFullscreen()
-      else if (root.requestFullscreen) {
-        const p = root.requestFullscreen()
+      const reqFS = root.requestFullscreen || root.webkitRequestFullscreen
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        const exitFS = document.exitFullscreen || document.webkitExitFullscreen
+        if (exitFS) exitFS.call(document)
+      } else if (reqFS) {
+        const p = reqFS.call(root)
         if (p && p.catch) p.catch(() => {})
       }
     } catch (e) {}
   })
+  // iPhone Safari 不支持元素级全屏，直接隐藏按钮
+  const fsBtn = document.getElementById('btn-fullscreen')
+  if (fsBtn && !(root.requestFullscreen || root.webkitRequestFullscreen)) {
+    fsBtn.style.display = 'none'
+  }
 })()

@@ -29,6 +29,7 @@ function makeEl() {
       _add(c) {}, _del(c) {},
     },
     setAttribute: noop, appendChild: noop, addEventListener: noop,
+    style: {},
     set innerHTML(v) {}, set textContent(v) {},
     get textContent() { return '' },
   }
@@ -51,14 +52,18 @@ global.document = {
 global.window = { }
 global.Image = class { set src(v) { /* 不触发 onload → 走矢量后备 */ } }
 
-let intervalCb = null
-global.setInterval = (cb) => { intervalCb = cb; return 1 }
-global.clearInterval = noop
+let rafCb = null
+global.requestAnimationFrame = (cb) => { rafCb = cb; return 1 }
+global.cancelAnimationFrame = noop
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'game.js'), 'utf8')
 eval(src)
 
-if (typeof intervalCb !== 'function') throw new Error('游戏循环未启动')
+if (typeof rafCb !== 'function') throw new Error('游戏循环未启动')
 // 驱动 1200 帧（约 20 秒游戏时间），覆盖 update + draw 全路径
-for (let i = 0; i < 1200; i++) intervalCb()
+for (let i = 0; i < 1200; i++) {
+  const cb = rafCb
+  rafCb = null
+  cb()
+}
 console.log('SMOKE OK: 1200 帧运行无异常（矢量后备路径全部覆盖）')
