@@ -2626,7 +2626,7 @@
       const st = curSt()
       // 触屏布局：血条/武器面板整体上抬，给摇杆与攻击键让位；右上信息左移避开暂停键
       const ui = isTouch
-        ? { bx: 20, bw: 170, byOff: 175, axOff: 20, ayOff: 226, txOff: 74 }
+        ? { bx: 20, bw: 170, byOff: 200, axOff: 20, ayOff: 236, txOff: 74 }
         : { bx: 24, bw: 210, byOff: 38, axOff: 26, ayOff: 38, txOff: 26 }
       // 左下：生命
       const bx = ui.bx
@@ -2707,8 +2707,9 @@
         g.fillText(String(i + 1), x + 7, sy + 10)
         g.globalAlpha = 1
       }
-      // 右上：波次
+      // 右上：波次（右对齐；武器槽遗留的 center 会让文字右半溢出屏幕）
       const tx = w - ui.txOff
+      g.textAlign = 'right'
       g.font = '700 20px system-ui, sans-serif'
       g.fillStyle = '#ffb199'
       g.fillText('第 ' + W.wave + ' 波', tx, 36)
@@ -2718,6 +2719,7 @@
       const remaining = W.spawnQueue + W.zombies.filter((z) => !z.dead).length
       g.fillText('剩余丧尸 ' + remaining, tx, 78)
       // 提示
+      g.textAlign = 'center'
       g.font = '600 12px system-ui, sans-serif'
       g.fillStyle = 'rgba(233,222,212,0.62)'
       g.fillText(isTouch ? '右上 Ⅱ 暂停 / 退出本局' : 'Esc 暂停 / 退出本局', w / 2, 26)
